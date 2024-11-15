@@ -1,0 +1,5 @@
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"200\",\"responseTime\":\"6.306\"}","timestamp":"2024-11-14T16:45:06.081Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"200\",\"responseTime\":\"6.516\"}","timestamp":"2024-11-15T18:47:43.784Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"User disconnected","timestamp":"2024-11-15T18:52:18.867Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"User disconnected","timestamp":"2024-11-15T18:55:27.105Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"User connected","timestamp":"2024-11-15T18:58:58.032Z"}
