@@ -5,10 +5,16 @@ import morgan from "morgan";
 import logger from "./utils/logger";
 import { createServer } from "http";
 import { Server } from "socket.io";
+import { createAdapter } from "@socket.io/redis-streams-adapter";
+import redis from "./redis";
+import errorMiddleware from "./middlewares/ApiHandler";
+import userRoutes from "./routes/user.route";
 
 const app: Application = express();
 const server = createServer(app);
-const io = new Server(server);
+const io = new Server({
+  adapter: createAdapter(redis),
+});
 const morganFormat = ":method :url :status :response-time ms";
 
 app.use(express.json({ limit: "50kb" }));
@@ -31,10 +37,19 @@ app.use(
   })
 );
 
-app.get("/", (req: Request, res: Response, next: NextFunction) => {
+app.get("/api/v1", (req: Request, res: Response, next: NextFunction) => {
   res.status(200).json({
     message: "Server is running",
   });
 });
+app.use("/api/v1/user", userRoutes);
+
+app.all("*", (req: Request, res: Response) => {
+  res.status(404).json({
+    message: "Route not found",
+  });
+});
+
+app.use(errorMiddleware);
 
 export default server;
