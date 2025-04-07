@@ -8,6 +8,7 @@ import {
 import Login from "../pages/Login";
 import { Toaster } from "sonner";
 import { Signup } from "@/pages/SignUp";
+import AuthLayout from "@/layouts/AuthLayout";
 // import MainLayout from "../layouts/MainLayout";
 // import DashboardLayout from "../layouts/DashboardLayout";
 // import ProtectedRoute from "./ProtectedRoute"; // Auth-based route protection
@@ -25,8 +26,10 @@ const AppRoutes = () => {
     <>
       <Router>
         <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Signup />} />
+          <Route element={<AuthLayout />}>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Signup />} />
+          </Route>
         </Routes>
       </Router>
       <Toaster />
