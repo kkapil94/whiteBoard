@@ -19,7 +19,7 @@ const morganFormat = ":method :url :status :response-time ms";
 
 app.use(express.json({ limit: "50kb" }));
 app.use(express.urlencoded({ limit: "50kb", extended: true }));
-app.use(cors({ credentials: true, origin: process.env.CLIENT_URL }));
+app.use(cors({ credentials: true, origin: "*" }));
 app.use(cookieParser());
 app.use(
   morgan(morganFormat, {
