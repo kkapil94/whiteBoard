@@ -61,6 +61,7 @@ function Login() {
   const onSubmit = async (data: LoginInFormValues) => {
     setIsLoading(true);
     try {
+      console.log({ data });
       // Remove confirmPassword before sending to API
       const result = await login(data).unwrap();
       dispatch(setCredentials(result));
@@ -71,7 +72,8 @@ function Login() {
 
       navigate("/dashboard");
     } catch (error: any) {
-      toast("Signup failed", {
+      console.log(error);
+      toast("Signin failed", {
         description:
           error.data?.message ||
           "There was an error creating your account. Please try again.",

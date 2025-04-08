@@ -34,10 +34,14 @@ import { toast } from "sonner";
 // Form validation schema - more comprehensive for signup
 const signupSchema = z
   .object({
-    fullName: z
+    name: z
       .string()
       .min(2, { message: "Name must be at least 2 characters" })
       .max(50, { message: "Name cannot exceed 50 characters" }),
+    username: z
+      .string()
+      .min(6, { message: "Username must be at least 6 characters" })
+      .max(50, { message: "Username cannot exceed 50 characters" }),
     email: z
       .string()
       .email({ message: "Please enter a valid email address" })
@@ -76,7 +80,8 @@ export function Signup() {
   const form = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
     defaultValues: {
-      fullName: "",
+      name: "",
+      username: "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -94,11 +99,11 @@ export function Signup() {
       const result = await register(signupData).unwrap();
       dispatch(setCredentials(result));
 
-      toast("Account created successfully", {
+      toast("Logged In successfully", {
         description: "Welcome to Whiteboard!",
       });
 
-      navigate("/dashboard");
+      navigate("/login");
     } catch (error: any) {
       toast("Signup failed", {
         description:
@@ -147,7 +152,7 @@ export function Signup() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
-                name="fullName"
+                name="name"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Full Name</FormLabel>
@@ -155,6 +160,23 @@ export function Signup() {
                       <Input
                         placeholder="John Doe"
                         autoComplete="name"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="username"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Username</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="John Doe"
+                        autoComplete="username"
                         {...field}
                       />
                     </FormControl>
