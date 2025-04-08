@@ -30,7 +30,6 @@ import { Separator } from "@/components/ui/separator";
 import { useRegisterMutation } from "@/store/api/authApi";
 import { setCredentials } from "@/store/slices/authSlice";
 import { toast } from "sonner";
-import { MousePointerClick } from "lucide-react";
 
 // Form validation schema - more comprehensive for signup
 const signupSchema = z
