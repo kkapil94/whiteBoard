@@ -1,0 +1,221 @@
+.whiteboard-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  background-color: #f5f5f5;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.tool-group,
+.style-group,
+.action-group {
+  display: flex;
+  align-items: center;
+  margin-right: 24px;
+  padding-right: 24px;
+  border-right: 1px solid #e0e0e0;
+}
+
+.action-group {
+  border-right: none;
+}
+
+.tool-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 4px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tool-button:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.tool-button.active {
+  background-color: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+}
+
+.color-picker,
+.stroke-width {
+  display: flex;
+  align-items: center;
+  margin: 0 8px;
+}
+
+.color-picker label,
+.stroke-width label {
+  margin-right: 8px;
+  font-size: 14px;
+  color: #333;
+}
+
+input[type="color"] {
+  width: 24px;
+  height: 24px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+input[type="range"] {
+  width: 100px;
+  margin: 0 8px;
+}
+
+.action-group button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 0 4px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background-color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-group button:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.canvas-wrapper {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background-color: #f0f0f0;
+  border-top: 1px solid #e0e0e0;
+}
+
+.drawing-canvas {
+  position: absolute;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+/* Cursor styles for different tools */
+.drawing-canvas.select {
+  cursor: default;
+}
+
+.drawing-canvas.rectangle,
+.drawing-canvas.circle,
+.drawing-canvas.line {
+  cursor: crosshair;
+}
+
+.drawing-canvas.freeDraw {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2"><path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>')
+      0 24,
+    auto;
+}
+
+.drawing-canvas.text {
+  cursor: text;
+}
+
+.drawing-canvas.eraser {
+  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2"><path d="M20 20h-8l-4-4H4v-4l8-8 8 8v8z"/></svg>')
+      0 24,
+    auto;
+}
+
+.drawing-canvas.panning {
+  cursor: grab;
+}
+
+.drawing-canvas.panning:active {
+  cursor: grabbing;
+}
+
+/* Loading screen */
+.loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #1890ff;
+  z-index: 100;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .tool-group,
+  .style-group,
+  .action-group {
+    margin-right: 0;
+    margin-bottom: 8px;
+    padding-right: 0;
+    padding-bottom: 8px;
+    border-right: none;
+    border-bottom: 1px solid #e0e0e0;
+    width: 100%;
+  }
+
+  .action-group {
+    border-bottom: none;
+  }
+}
+
+/* Animation for cursor */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.cursor-point {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: rgba(24, 144, 255, 0.7);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  animation: pulse 1s infinite;
+}

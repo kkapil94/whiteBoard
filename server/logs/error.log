@@ -1,2 +1,12 @@
 {"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"404\",\"responseTime\":\"1.840\"}","timestamp":"2025-03-03T00:58:17.204Z"}
 {"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"GET\",\"url\":\"/\",\"status\":\"404\",\"responseTime\":\"0.449\"}","timestamp":"2025-03-03T00:58:31.192Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"25.123\"}","timestamp":"2025-04-08T12:32:14.094Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"4.049\"}","timestamp":"2025-04-08T12:32:42.364Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/register\",\"status\":\"201\",\"responseTime\":\"98.293\"}","timestamp":"2025-04-08T12:53:56.403Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/register\",\"status\":\"400\",\"responseTime\":\"3.349\"}","timestamp":"2025-04-08T12:55:23.167Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/register\",\"status\":\"400\",\"responseTime\":\"2.970\"}","timestamp":"2025-04-08T12:55:47.996Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"4.205\"}","timestamp":"2025-04-08T12:57:51.375Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"2.275\"}","timestamp":"2025-04-08T12:57:57.650Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"5.895\"}","timestamp":"2025-04-08T12:58:20.598Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"400\",\"responseTime\":\"3.533\"}","timestamp":"2025-04-08T12:58:37.787Z"}
+{"level":"\u001b[32minfo\u001b[39m","message":"{\"method\":\"POST\",\"url\":\"/api/v1/user/login\",\"status\":\"200\",\"responseTime\":\"63.430\"}","timestamp":"2025-04-08T13:00:41.624Z"}

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
@@ -9,7 +9,7 @@ import Login from "../pages/Login";
 import { Toaster } from "sonner";
 import { Signup } from "@/pages/SignUp";
 import AuthLayout from "@/layouts/AuthLayout";
-import Canvas from "@/components/canvas/Canvas";
+import Whiteboard from "@/pages/Whiteboard";
 // import MainLayout from "../layouts/MainLayout";
 // import DashboardLayout from "../layouts/DashboardLayout";
 // import ProtectedRoute from "./ProtectedRoute"; // Auth-based route protection
@@ -23,6 +23,19 @@ import Canvas from "@/components/canvas/Canvas";
 // const NotFound = lazy(() => import("../pages/NotFound"));
 
 const AppRoutes = () => {
+  const [canvasWidth, setCanvasWidth] = useState(window.innerWidth);
+  const [canvasHeight, setCanvasHeight] = useState(window.innerHeight - 60); // Account for header
+
+  // Update canvas size on window resize
+  React.useEffect(() => {
+    const handleResize = () => {
+      setCanvasWidth(window.innerWidth);
+      setCanvasHeight(window.innerHeight - 60);
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
   return (
     <>
       <Router>
@@ -31,7 +44,10 @@ const AppRoutes = () => {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Signup />} />
           </Route>
-          <Route path="/playground" element={<Canvas />} />
+          <Route
+            path="/"
+            element={<Whiteboard width={canvasWidth} height={canvasHeight} />}
+          />
         </Routes>
       </Router>
       <Toaster />
