@@ -100,7 +100,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     canvas.selectionLineWidth = 1;
 
     // Add grid background
-    drawGrid(canvas);
+    // drawGrid(canvas);
 
     // Setup event listeners for history management
     const historyCleanup = setupHistoryManagement(canvas);
@@ -140,11 +140,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
       case "freeDraw":
         canvas.isDrawingMode = true;
-        const brush = canvas.freeDrawingBrush;
-        if (brush) {
-          brush.color = strokeColor;
-          brush.width = strokeWidth;
+
+        if (!canvas.freeDrawingBrush) {
+          canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
         }
+
+        const brush = canvas.freeDrawingBrush;
+        brush.color = strokeColor;
+        brush.width = strokeWidth;
         break;
 
       case "eraser":
@@ -200,48 +203,48 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   }, [strokeColor, fillColor, strokeWidth, useFill, fontSize, fontFamily]);
 
   // Draw grid pattern on canvas
-  const drawGrid = (canvas: fabric.Canvas) => {
-    const gridSize = 20;
-    const gridLines: fabric.Line[] = [];
+  // const drawGrid = (canvas: fabric.Canvas) => {
+  //   const gridSize = 20;
+  //   const gridLines: fabric.Line[] = [];
 
-    // Create vertical lines
-    for (let i = gridSize; i < width; i += gridSize) {
-      gridLines.push(
-        new fabric.Line([i, 0, i, height], {
-          stroke: "#e0e0e0",
-          selectable: false,
-          evented: false,
-          strokeWidth: 0.5,
-        })
-      );
-    }
+  //   // Create vertical lines
+  //   for (let i = gridSize; i < width; i += gridSize) {
+  //     gridLines.push(
+  //       new fabric.Line([i, 0, i, height], {
+  //         stroke: "#e0e0e0",
+  //         selectable: false,
+  //         evented: false,
+  //         strokeWidth: 0.5,
+  //       })
+  //     );
+  //   }
 
-    // Create horizontal lines
-    for (let i = gridSize; i < height; i += gridSize) {
-      gridLines.push(
-        new fabric.Line([0, i, width, i], {
-          stroke: "#e0e0e0",
-          selectable: false,
-          evented: false,
-          strokeWidth: 0.5,
-        })
-      );
-    }
+  //   // Create horizontal lines
+  //   for (let i = gridSize; i < height; i += gridSize) {
+  //     gridLines.push(
+  //       new fabric.Line([0, i, width, i], {
+  //         stroke: "#e0e0e0",
+  //         selectable: false,
+  //         evented: false,
+  //         strokeWidth: 0.5,
+  //       })
+  //     );
+  //   }
 
-    // Add all grid lines to canvas
-    const gridGroup = new fabric.Group(gridLines, {
-      selectable: false,
-      evented: false,
-      lockMovementX: true,
-      lockMovementY: true,
-      lockScalingX: true,
-      lockScalingY: true,
-      lockRotation: true,
-    });
+  //   // Add all grid lines to canvas
+  //   const gridGroup = new fabric.Group(gridLines, {
+  //     selectable: false,
+  //     evented: false,
+  //     lockMovementX: true,
+  //     lockMovementY: true,
+  //     lockScalingX: true,
+  //     lockScalingY: true,
+  //     lockRotation: true,
+  //   });
 
-    canvas.add(gridGroup);
-    canvas.sendObjectToBack(gridGroup);
-  };
+  //   canvas.add(gridGroup);
+  //   canvas.sendObjectToBack(gridGroup);
+  // };
 
   // Setup history management (undo/redo)
   const setupHistoryManagement = (canvas: fabric.Canvas) => {
@@ -619,55 +622,48 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     if (!canvas) return;
 
     try {
-      // Create a temporary canvas for export (without grid)
       const tempCanvas = document.createElement("canvas");
       tempCanvas.width = canvas.width!;
       tempCanvas.height = canvas.height!;
       const tempCtx = tempCanvas.getContext("2d");
-
       if (!tempCtx) return;
 
-      // Fill with white background
       tempCtx.fillStyle = "#FFFFFF";
       tempCtx.fillRect(0, 0, canvas.width!, canvas.height!);
 
-      // Draw all objects except grid
       const objects = canvas.getObjects();
       const visibleObjects = objects.filter((obj) => obj.evented !== false);
 
-      // Create a temporary Fabric.js canvas
       const exportCanvas = new fabric.StaticCanvas(undefined, {
         width: canvas.width,
         height: canvas.height,
       });
 
-      // Add visible objects
-      visibleObjects.forEach((obj) => {
-        // Clone the object and add to export canvas
-        obj.clone((cloned: fabric.Object) => {
-          exportCanvas.add(cloned);
+      const cloneAndExport = async () => {
+        const clones = await Promise.all(
+          visibleObjects.map((obj) => obj.clone?.())
+        );
 
-          // Check if all objects have been added
-          if (exportCanvas.getObjects().length === visibleObjects.length) {
-            // Export as PNG
-            const dataURL = exportCanvas.toDataURL({
-              multiplier: 1,
-              format: "png",
-              quality: 1,
-            });
-
-            // Create download link
-            const link = document.createElement("a");
-            link.download =
-              "whiteboard-" + new Date().toISOString().slice(0, 10) + ".png";
-            link.href = dataURL;
-            link.click();
-
-            // Clean up
-            exportCanvas.dispose();
-          }
+        clones.forEach((cloned) => {
+          if (cloned) exportCanvas.add(cloned);
         });
-      });
+
+        const dataURL = exportCanvas.toDataURL({
+          multiplier: 1,
+          format: "png",
+          quality: 1,
+        });
+
+        const link = document.createElement("a");
+        link.download =
+          "whiteboard-" + new Date().toISOString().slice(0, 10) + ".png";
+        link.href = dataURL;
+        link.click();
+
+        exportCanvas.dispose();
+      };
+
+      cloneAndExport();
     } catch (error) {
       console.error("Error saving canvas:", error);
     }
