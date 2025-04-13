@@ -1,35 +1,27 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import ObjectManager, { Shape, Point, LineShape } from "@/lib/objectManager";
+import * as fabric from "fabric";
 import {
-  FaCircle,
-  FaEraser,
-  FaFont,
-  FaLevelDownAlt,
-  FaLevelUpAlt,
-  FaMinus,
   FaMousePointer,
-  FaPencilAlt,
   FaSquare,
+  FaCircle,
+  FaMinus,
+  FaPencilAlt,
+  FaFont,
+  FaEraser,
   FaTrash,
+  FaLevelUpAlt,
+  FaLevelDownAlt,
+  FaDownload,
+  FaUpload,
+  FaUndo,
+  FaRedo,
+  FaClone,
 } from "react-icons/fa";
-// import {
-//   faSquare,
-//   faCircle,
-//   faWindowMinimize,
-//   faMinusSquare,
-//   faFileLines,
-// } from "@fortawesome/free-regular-svg-icons";
 import "./Whiteboard.css";
 
 interface WhiteboardProps {
   width: number;
   height: number;
-}
-
-interface Transform {
-  x: number;
-  y: number;
-  scale: number;
 }
 
 type Tool =
@@ -42,1009 +34,947 @@ type Tool =
   | "eraser";
 
 const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
-  // Canvas and rendering refs
+  // Canvas and fabric references
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [context, setContext] = useState<CanvasRenderingContext2D | null>(null);
+  const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
 
-  // Object management
-  const objectManagerRef = useRef<ObjectManager>(new ObjectManager());
-  const [shapes, setShapes] = useState<Shape[]>([]);
-  const [selectedShapes, setSelectedShapes] = useState<Shape[]>([]);
-
-  // Tool and style states
+  // State for toolbar controls
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [strokeColor, setStrokeColor] = useState("#000000");
   const [fillColor, setFillColor] = useState("transparent");
   const [strokeWidth, setStrokeWidth] = useState(2);
+  const [fontSize, setFontSize] = useState(20);
+  const [fontFamily, setFontFamily] = useState("Arial");
+  const [useFill, setUseFill] = useState(false);
 
-  // Canvas transform state
-  const [transform, setTransform] = useState<Transform>({
-    x: 0,
-    y: 0,
-    scale: 1,
-  });
+  // History management state
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
-  // Drawing and interaction states
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [isPanning, setIsPanning] = useState(false);
-  const [startPoint, setStartPoint] = useState<Point | null>(null);
-  const [lastPoint, setLastPoint] = useState<Point | null>(null);
-  const [startPanPoint, setStartPanPoint] = useState<Point>({ x: 0, y: 0 });
-  const [currentShape, setCurrentShape] = useState<Shape | null>(null);
+  // Use refs to capture current state for event handlers
+  const activeToolRef = useRef<Tool>(activeTool);
+  const strokeColorRef = useRef(strokeColor);
+  const fillColorRef = useRef(fillColor);
+  const strokeWidthRef = useRef(strokeWidth);
+  const fontSizeRef = useRef(fontSize);
+  const fontFamilyRef = useRef(fontFamily);
+  const useFillRef = useRef(useFill);
 
-  // Initialize canvas
+  // Update refs when state changes
   useEffect(() => {
-    if (canvasRef.current) {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
+    activeToolRef.current = activeTool;
+    strokeColorRef.current = strokeColor;
+    fillColorRef.current = fillColor;
+    strokeWidthRef.current = strokeWidth;
+    fontSizeRef.current = fontSize;
+    fontFamilyRef.current = fontFamily;
+    useFillRef.current = useFill;
+  }, [
+    activeTool,
+    strokeColor,
+    fillColor,
+    strokeWidth,
+    fontSize,
+    fontFamily,
+    useFill,
+  ]);
 
-      // Set up high DPI canvas
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
+  // Initialize Fabric canvas
+  useEffect(() => {
+    if (!canvasRef.current) return;
 
-      if (ctx) {
-        ctx.scale(dpr, dpr);
-        setContext(ctx);
-      }
-    }
+    // Create new Fabric canvas
+    const canvas = new fabric.Canvas(canvasRef.current, {
+      width,
+      height,
+      backgroundColor: "#ffffff",
+      preserveObjectStacking: true,
+      selection: true,
+    });
 
-    // Cleanup function
+    fabricCanvasRef.current = canvas;
+
+    // Set default selection style
+    canvas.selectionColor = "rgba(100, 100, 255, 0.3)";
+    canvas.selectionBorderColor = "#1890ff";
+    canvas.selectionLineWidth = 1;
+
+    // Add grid background
+    drawGrid(canvas);
+
+    // Setup event listeners for history management
+    const historyCleanup = setupHistoryManagement(canvas);
+
+    // Setup tool event listeners
+    const toolEventCleanup = setupToolEventListeners(canvas);
+
+    // On component unmount, dispose canvas
     return () => {
-      // Cancel any pending animations
+      historyCleanup();
+      toolEventCleanup();
+      canvas.dispose();
+      fabricCanvasRef.current = null;
     };
   }, [width, height]);
 
-  // Draw the canvas
-  const drawCanvas = useCallback(() => {
-    if (!context) return;
-
-    context.save();
-    context.clearRect(0, 0, width, height);
-
-    // Apply the transform
-    context.translate(transform.x, transform.y);
-    context.scale(transform.scale, transform.scale);
-
-    // Draw a white background
-    context.fillStyle = "#ffffff";
-    context.fillRect(
-      -transform.x / transform.scale,
-      -transform.y / transform.scale,
-      width / transform.scale,
-      height / transform.scale
-    );
-
-    // Draw grid
-    drawGrid();
-
-    // Draw all shapes
-    const sortedShapes = [...shapes].sort((a, b) => a.zIndex - b.zIndex);
-    sortedShapes.forEach((shape) => {
-      drawShape(shape);
-    });
-
-    // Draw current shape being created
-    if (currentShape) {
-      drawShape(currentShape);
-    }
-
-    // Draw selection outlines
-    selectedShapes.forEach((shape) => {
-      drawSelectionOutline(shape);
-    });
-
-    context.restore();
-  }, [context, width, height, transform, shapes, currentShape, selectedShapes]);
-
-  // For initial setup of ObjectManager
+  // Handle active tool changes
   useEffect(() => {
-    const objectManager = objectManagerRef.current;
-    // Initialize shapes only once
-    if (shapes.length === 0) {
-      setShapes(objectManager.getShapes());
-      setSelectedShapes(objectManager.getSelectedShapes());
-    }
-  }, []);
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
 
-  // For rendering
+    // Reset canvas mode
+    canvas.isDrawingMode = false;
+    canvas.selection = true;
+
+    // Deselect objects when changing tools (except when selecting)
+    if (activeTool !== "select") {
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+    }
+
+    // Configure canvas based on active tool
+    switch (activeTool) {
+      case "select":
+        canvas.selection = true;
+        break;
+
+      case "freeDraw":
+        canvas.isDrawingMode = true;
+        const brush = canvas.freeDrawingBrush;
+        if (brush) {
+          brush.color = strokeColor;
+          brush.width = strokeWidth;
+        }
+        break;
+
+      case "eraser":
+        canvas.selection = false;
+        break;
+
+      default:
+        canvas.selection = false;
+        break;
+    }
+  }, [activeTool, strokeColor, strokeWidth]);
+
+  // Handle color and style changes
   useEffect(() => {
-    if (context) {
-      drawCanvas();
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    // Update free drawing brush
+    if (canvas.isDrawingMode) {
+      const brush = canvas.freeDrawingBrush;
+      if (brush) {
+        brush.color = strokeColor;
+        brush.width = strokeWidth;
+      }
     }
-  }, [drawCanvas, context]);
 
-  // Draw grid pattern
-  const drawGrid = useCallback(() => {
-    if (!context) return;
+    // Update active object if any
+    const activeObject = canvas.getActiveObject();
+    if (activeObject) {
+      if (
+        activeObject.type !== "textbox" &&
+        activeObject.stroke !== undefined
+      ) {
+        activeObject.set("stroke", strokeColor);
+      }
 
+      if (activeObject.type !== "textbox" && activeObject.fill !== undefined) {
+        activeObject.set("fill", useFill ? fillColor : "transparent");
+      }
+
+      if (activeObject.type === "textbox") {
+        activeObject.set("fill", strokeColor);
+        activeObject.set("fontSize", fontSize);
+        activeObject.set("fontFamily", fontFamily);
+      }
+
+      if (activeObject.strokeWidth !== undefined) {
+        activeObject.set("strokeWidth", strokeWidth);
+      }
+
+      canvas.requestRenderAll();
+    }
+  }, [strokeColor, fillColor, strokeWidth, useFill, fontSize, fontFamily]);
+
+  // Draw grid pattern on canvas
+  const drawGrid = (canvas: fabric.Canvas) => {
     const gridSize = 20;
-    const offsetX = transform.x % (gridSize * transform.scale);
-    const offsetY = transform.y % (gridSize * transform.scale);
+    const gridLines: fabric.Line[] = [];
 
-    context.beginPath();
-    context.setLineDash([]);
-    context.strokeStyle = "#e0e0e0";
-    context.lineWidth = 0.5;
-
-    // Draw vertical lines
-    for (let x = offsetX; x < width; x += gridSize * transform.scale) {
-      context.moveTo(x, 0);
-      context.lineTo(x, height);
-    }
-
-    // Draw horizontal lines
-    for (let y = offsetY; y < height; y += gridSize * transform.scale) {
-      context.moveTo(0, y);
-      context.lineTo(width, y);
-    }
-
-    context.stroke();
-  }, [context, transform, width, height]);
-
-  // Draw a shape
-  const drawShape = (shape: Shape) => {
-    if (!context) return;
-
-    context.save();
-
-    // Set up styles
-    context.fillStyle = shape.style.fillColor;
-    context.strokeStyle = shape.style.strokeColor;
-    context.lineWidth = shape.style.strokeWidth;
-    context.setLineDash([]);
-
-    // Apply shape-specific rotation
-    context.translate(shape.x, shape.y);
-    context.rotate((shape.rotation * Math.PI) / 180);
-    context.translate(-shape.x, -shape.y);
-
-    switch (shape.type) {
-      case "rectangle":
-        context.beginPath();
-        context.rect(
-          shape.x - shape.width / 2,
-          shape.y - shape.height / 2,
-          shape.width,
-          shape.height
-        );
-        if (shape.style.fillColor !== "transparent") {
-          context.fill();
-        }
-        context.stroke();
-        break;
-
-      case "circle":
-        context.beginPath();
-        context.arc(shape.x, shape.y, shape.radius, 0, Math.PI * 2);
-        if (shape.style.fillColor !== "transparent") {
-          context.fill();
-        }
-        context.stroke();
-        break;
-
-      case "line":
-        context.beginPath();
-        context.moveTo(
-          shape.x + shape.points[0].x,
-          shape.y + shape.points[0].y
-        );
-        for (let i = 1; i < shape.points.length; i++) {
-          context.lineTo(
-            shape.x + shape.points[i].x,
-            shape.y + shape.points[i].y
-          );
-        }
-        context.stroke();
-        break;
-
-      case "freeDraw":
-        if (shape.points.length > 0) {
-          context.beginPath();
-          context.moveTo(
-            shape.x + shape.points[0].x,
-            shape.y + shape.points[0].y
-          );
-          for (let i = 1; i < shape.points.length; i++) {
-            context.lineTo(
-              shape.x + shape.points[i].x,
-              shape.y + shape.points[i].y
-            );
-          }
-          context.stroke();
-        }
-        break;
-
-      case "text":
-        context.font = `${shape.fontSize}px ${shape.fontFamily}`;
-        context.fillStyle = shape.style.strokeColor;
-        context.fillText(shape.text, shape.x, shape.y);
-        break;
-    }
-
-    context.restore();
-  };
-
-  // Draw selection outline and handles around a shape
-  const drawSelectionOutline = (shape: Shape) => {
-    if (!context) return;
-
-    context.save();
-
-    // Apply shape rotation
-    context.translate(shape.x, shape.y);
-    context.rotate((shape.rotation * Math.PI) / 180);
-    context.translate(-shape.x, -shape.y);
-
-    context.strokeStyle = "#1890ff";
-    context.lineWidth = 1;
-    context.setLineDash([5, 3]);
-
-    let bounds = { x: 0, y: 0, width: 0, height: 0 };
-
-    switch (shape.type) {
-      case "rectangle":
-        bounds = {
-          x: shape.x - shape.width / 2,
-          y: shape.y - shape.height / 2,
-          width: shape.width,
-          height: shape.height,
-        };
-        break;
-
-      case "circle":
-        bounds = {
-          x: shape.x - shape.radius,
-          y: shape.y - shape.radius,
-          width: shape.radius * 2,
-          height: shape.radius * 2,
-        };
-        break;
-
-      case "line":
-      case "freeDraw":
-        if (shape.points && shape.points.length > 0) {
-          // Find bounding box of all points
-          let minX = shape.points[0].x;
-          let minY = shape.points[0].y;
-          let maxX = shape.points[0].x;
-          let maxY = shape.points[0].y;
-
-          for (const point of shape.points) {
-            minX = Math.min(minX, point.x);
-            minY = Math.min(minY, point.y);
-            maxX = Math.max(maxX, point.x);
-            maxY = Math.max(maxY, point.y);
-          }
-
-          bounds = {
-            x: shape.x + minX,
-            y: shape.y + minY,
-            width: maxX - minX,
-            height: maxY - minY,
-          };
-        }
-        break;
-
-      case "text":
-        context.font = `${shape.fontSize}px ${shape.fontFamily}`;
-        const metrics = context.measureText(shape.text);
-        bounds = {
-          x: shape.x,
-          y: shape.y - shape.fontSize,
-          width: metrics.width,
-          height: shape.fontSize,
-        };
-        break;
-    }
-
-    // Draw dashed selection rectangle
-    context.beginPath();
-    context.rect(bounds.x, bounds.y, bounds.width, bounds.height);
-    context.stroke();
-
-    // Draw resizing handles (with solid lines)
-    context.setLineDash([]);
-    context.fillStyle = "#ffffff";
-    context.strokeStyle = "#1890ff";
-    context.lineWidth = 1;
-
-    const handleSize = 6;
-    const halfHandle = handleSize / 2;
-
-    // Draw the 8 handles
-    const handles = [
-      { x: bounds.x, y: bounds.y }, // Top-left
-      { x: bounds.x + bounds.width / 2, y: bounds.y }, // Top-center
-      { x: bounds.x + bounds.width, y: bounds.y }, // Top-right
-      { x: bounds.x, y: bounds.y + bounds.height / 2 }, // Middle-left
-      { x: bounds.x + bounds.width, y: bounds.y + bounds.height / 2 }, // Middle-right
-      { x: bounds.x, y: bounds.y + bounds.height }, // Bottom-left
-      { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height }, // Bottom-center
-      { x: bounds.x + bounds.width, y: bounds.y + bounds.height }, // Bottom-right
-    ];
-
-    handles.forEach((handle) => {
-      context.beginPath();
-      context.rect(
-        handle.x - halfHandle,
-        handle.y - halfHandle,
-        handleSize,
-        handleSize
+    // Create vertical lines
+    for (let i = gridSize; i < width; i += gridSize) {
+      gridLines.push(
+        new fabric.Line([i, 0, i, height], {
+          stroke: "#e0e0e0",
+          selectable: false,
+          evented: false,
+          strokeWidth: 0.5,
+        })
       );
-      context.fill();
-      context.stroke();
+    }
+
+    // Create horizontal lines
+    for (let i = gridSize; i < height; i += gridSize) {
+      gridLines.push(
+        new fabric.Line([0, i, width, i], {
+          stroke: "#e0e0e0",
+          selectable: false,
+          evented: false,
+          strokeWidth: 0.5,
+        })
+      );
+    }
+
+    // Add all grid lines to canvas
+    const gridGroup = new fabric.Group(gridLines, {
+      selectable: false,
+      evented: false,
+      lockMovementX: true,
+      lockMovementY: true,
+      lockScalingX: true,
+      lockScalingY: true,
+      lockRotation: true,
     });
 
-    // Draw rotation handle
-    context.beginPath();
-    context.moveTo(bounds.x + bounds.width / 2, bounds.y);
-    context.lineTo(bounds.x + bounds.width / 2, bounds.y - 20);
-    context.stroke();
-
-    context.beginPath();
-    context.arc(
-      bounds.x + bounds.width / 2,
-      bounds.y - 20,
-      halfHandle,
-      0,
-      Math.PI * 2
-    );
-    context.fill();
-    context.stroke();
-
-    context.restore();
+    canvas.add(gridGroup);
+    canvas.sendObjectToBack(gridGroup);
   };
 
-  // Convert screen coordinates to canvas coordinates
-  const screenToCanvas = (x: number, y: number): Point => {
-    if (!canvasRef.current) return { x: 0, y: 0 };
+  // Setup history management (undo/redo)
+  const setupHistoryManagement = (canvas: fabric.Canvas) => {
+    let history: string[] = [];
+    let currentStateIndex = -1;
+    let isRedoing = false;
+    let isSaving = false;
 
-    const rect = canvasRef.current.getBoundingClientRect();
-    const scaleX = canvasRef.current.width / rect.width;
-    const scaleY = canvasRef.current.height / rect.height;
+    const saveHistory = () => {
+      if (isRedoing || isSaving) return;
 
-    return {
-      x: ((x - rect.left) * scaleX - transform.x) / transform.scale,
-      y: ((y - rect.top) * scaleY - transform.y) / transform.scale,
+      isSaving = true;
+
+      // If we're not at the end of the history array, remove everything after current state
+      if (currentStateIndex < history.length - 1) {
+        history = history.slice(0, currentStateIndex + 1);
+      }
+
+      // Save current state
+      const json = JSON.stringify(canvas);
+      history.push(json);
+      currentStateIndex = history.length - 1;
+
+      // Update buttons state
+      setCanUndo(currentStateIndex > 0);
+      setCanRedo(currentStateIndex < history.length - 1);
+
+      isSaving = false;
+    };
+
+    // Save state on object modifications
+    canvas.on("object:modified", saveHistory);
+    canvas.on("object:added", saveHistory);
+    canvas.on("object:removed", saveHistory);
+
+    // Initial state
+    saveHistory();
+
+    // Expose undo/redo methods
+    const canvasUndo = () => {
+      if (currentStateIndex <= 0) return;
+
+      isRedoing = true;
+      currentStateIndex--;
+
+      const json = history[currentStateIndex];
+      canvas.loadFromJSON(json, () => {
+        canvas.requestRenderAll();
+        isRedoing = false;
+        setCanUndo(currentStateIndex > 0);
+        setCanRedo(currentStateIndex < history.length - 1);
+      });
+    };
+
+    const canvasRedo = () => {
+      if (currentStateIndex >= history.length - 1) return;
+
+      isRedoing = true;
+      currentStateIndex++;
+
+      const json = history[currentStateIndex];
+      canvas.loadFromJSON(json, () => {
+        canvas.requestRenderAll();
+        isRedoing = false;
+        setCanUndo(currentStateIndex > 0);
+        setCanRedo(currentStateIndex < history.length - 1);
+      });
+    };
+
+    // Assign to window for external access
+    (window as any).canvasUndo = canvasUndo;
+    (window as any).canvasRedo = canvasRedo;
+
+    // Return cleanup function
+    return () => {
+      canvas.off("object:modified", saveHistory);
+      canvas.off("object:added", saveHistory);
+      canvas.off("object:removed", saveHistory);
+      delete (window as any).canvasUndo;
+      delete (window as any).canvasRedo;
     };
   };
 
-  // Mouse event handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
+  // Setup event listeners for tools
+  const setupToolEventListeners = (canvas: fabric.Canvas) => {
+    let isDrawing = false;
+    let startPoint: { x: number; y: number } | null = null;
+    let currentObject: fabric.Object | null = null;
 
-    const canvasPoint = screenToCanvas(e.clientX, e.clientY);
-    setLastPoint(canvasPoint);
+    const handleMouseDown = (options: any) => {
+      if (!options.pointer) return;
 
-    // Right-click for panning
-    if (e.button === 2 || (e.button === 0 && e.altKey)) {
-      setIsPanning(true);
-      setStartPanPoint({
-        x: e.clientX - transform.x,
-        y: e.clientY - transform.y,
-      });
-      return;
-    }
+      // Skip if not left mouse button
+      // @ts-ignore - e exists on options.e
+      if (options.e?.button !== undefined && options.e?.button !== 0) return;
 
-    if (e.button === 0) {
-      // Left click
-      if (activeTool === "select") {
-        const objectManager = objectManagerRef.current;
-        const hitShape = objectManager.findShapeAtPoint(canvasPoint, context!);
+      const pointer = options.pointer;
+      startPoint = { x: pointer.x, y: pointer.y };
+      isDrawing = true;
 
-        if (hitShape) {
-          // If the clicked shape is already selected, don't deselect others
-          const addToSelection = e.shiftKey || hitShape.isSelected;
-          objectManager.selectShapes([hitShape.id], addToSelection);
+      if (activeToolRef.current === "select") return;
 
-          setIsDrawing(true);
-          setStartPoint(canvasPoint);
-        } else {
-          objectManager.deselectAll();
-        }
-
-        // Update states
-        setShapes(objectManager.getShapes());
-        setSelectedShapes(objectManager.getSelectedShapes());
-      } else {
-        // Start drawing a new shape
-        setIsDrawing(true);
-        setStartPoint(canvasPoint);
-
-        // Create a new shape based on the active tool
-        const objectManager = objectManagerRef.current;
-        let newShape: Shape | null = null;
-
-        const shapeStyle = {
-          strokeColor,
-          fillColor,
-          strokeWidth,
-        };
-
-        switch (activeTool) {
-          case "rectangle":
-            newShape = objectManager.addShape(
-              {
-                x: canvasPoint.x,
-                y: canvasPoint.y,
-                width: 0,
-                height: 0,
-                style: shapeStyle,
-              },
-              "rectangle"
-            );
-            break;
-
-          case "circle":
-            newShape = objectManager.addShape(
-              {
-                x: canvasPoint.x,
-                y: canvasPoint.y,
-                radius: 0,
-                style: shapeStyle,
-              },
-              "circle"
-            );
-            break;
-
-          case "line":
-            newShape = objectManager.addShape(
-              {
-                x: 0,
-                y: 0,
-                points: [
-                  { x: canvasPoint.x, y: canvasPoint.y },
-                  { x: canvasPoint.x, y: canvasPoint.y },
-                ],
-                style: shapeStyle,
-              },
-              "line"
-            );
-            break;
-
-          case "freeDraw":
-            newShape = objectManager.addShape(
-              {
-                x: 0,
-                y: 0,
-                points: [{ x: canvasPoint.x, y: canvasPoint.y }],
-                style: shapeStyle,
-              },
-              "freeDraw"
-            );
-            break;
-
-          case "text":
-            newShape = objectManager.addShape(
-              {
-                x: canvasPoint.x,
-                y: canvasPoint.y,
-                text: "Double-click to edit",
-                fontSize: 16,
-                fontFamily: "Arial",
-                style: shapeStyle,
-              },
-              "text"
-            );
-            break;
-
-          case "eraser":
-            const hitShape = objectManager.findShapeAtPoint(
-              canvasPoint,
-              context!
-            );
-            if (hitShape) {
-              objectManager.deleteShapes([hitShape.id]);
-              setShapes(objectManager.getShapes());
-            }
-            break;
-        }
-
-        setCurrentShape(newShape);
-      }
-    }
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    e.preventDefault();
-
-    const canvasPoint = screenToCanvas(e.clientX, e.clientY);
-
-    // Handle panning
-    if (isPanning) {
-      setTransform({
-        ...transform,
-        x: e.clientX - startPanPoint.x,
-        y: e.clientY - startPanPoint.y,
-      });
-      return;
-    }
-
-    // Handle drawing or manipulating shapes
-    if (isDrawing && startPoint && lastPoint) {
-      const objectManager = objectManagerRef.current;
-
-      if (activeTool === "select" && selectedShapes.length > 0) {
-        // Move selected shapes
-        const dx = canvasPoint.x - lastPoint.x;
-        const dy = canvasPoint.y - lastPoint.y;
-
-        const selectedIds = selectedShapes.map((shape) => shape.id);
-        objectManager.moveShapes(selectedIds, dx, dy);
-
-        setShapes(objectManager.getShapes());
-        setSelectedShapes(objectManager.getSelectedShapes());
-      } else if (activeTool !== "select" && currentShape) {
-        // Update the current shape being drawn
-        switch (activeTool) {
-          case "rectangle":
-            objectManager.updateShape(currentShape.id, {
-              width: canvasPoint.x - startPoint.x,
-              height: canvasPoint.y - startPoint.y,
-            });
-            break;
-
-          case "circle":
-            const dx = canvasPoint.x - startPoint.x;
-            const dy = canvasPoint.y - startPoint.y;
-            const radius = Math.sqrt(dx * dx + dy * dy);
-            objectManager.updateShape(currentShape.id, { radius });
-            break;
-
-          case "line":
-            objectManager.updateShape(currentShape.id, {
-              points: [
-                { x: startPoint.x, y: startPoint.y },
-                { x: canvasPoint.x, y: canvasPoint.y },
-              ],
-            });
-            break;
-
-          case "freeDraw":
-            // Add the new point to the existing points
-            objectManager.updateShape(currentShape.id, {
-              points: [
-                ...((currentShape as LineShape).points || []),
-                { x: canvasPoint.x, y: canvasPoint.y },
-              ],
-            });
-            break;
-
-          case "eraser":
-            const hitShape = objectManager.findShapeAtPoint(
-              canvasPoint,
-              context!
-            );
-            if (hitShape) {
-              objectManager.deleteShapes([hitShape.id]);
-            }
-            break;
-        }
-
-        setShapes(objectManager.getShapes());
-        setCurrentShape(shapes.find((s) => s.id === currentShape.id) || null);
-      }
-    }
-
-    setLastPoint(canvasPoint);
-  };
-
-  const handleMouseUp = (e: React.MouseEvent) => {
-    e.preventDefault();
-
-    // End current drawing/interaction
-    if (isDrawing && currentShape && activeTool !== "select") {
-      // Finalize shape if it's valid
-      const objectManager = objectManagerRef.current;
-
-      // For some shapes, check if they have valid dimensions
-      let isValid = true;
-
-      switch (currentShape.type) {
+      // Create new objects based on tool
+      switch (activeToolRef.current) {
         case "rectangle":
-          isValid =
-            Math.abs(currentShape.width) > 2 &&
-            Math.abs(currentShape.height) > 2;
+          currentObject = new fabric.Rect({
+            left: pointer.x,
+            top: pointer.y,
+            width: 0,
+            height: 0,
+            fill: useFillRef.current ? fillColorRef.current : "transparent",
+            stroke: strokeColorRef.current,
+            strokeWidth: strokeWidthRef.current,
+            selectable: false,
+          });
+          canvas.add(currentObject);
           break;
 
         case "circle":
-          isValid = currentShape.radius > 2;
+          currentObject = new fabric.Circle({
+            left: pointer.x,
+            top: pointer.y,
+            radius: 0,
+            fill: useFillRef.current ? fillColorRef.current : "transparent",
+            stroke: strokeColorRef.current,
+            strokeWidth: strokeWidthRef.current,
+            selectable: false,
+          });
+          canvas.add(currentObject);
           break;
 
         case "line":
-          const p1 = currentShape.points[0];
-          const p2 = currentShape.points[1];
-          isValid = Math.abs(p1.x - p2.x) > 2 || Math.abs(p1.y - p2.y) > 2;
+          currentObject = new fabric.Line(
+            [pointer.x, pointer.y, pointer.x, pointer.y],
+            {
+              stroke: strokeColorRef.current,
+              strokeWidth: strokeWidthRef.current,
+              selectable: false,
+            }
+          );
+          canvas.add(currentObject);
           break;
 
-        case "freeDraw":
-          isValid = currentShape.points.length > 1;
+        case "text":
+          currentObject = new fabric.Textbox("Text", {
+            left: pointer.x,
+            top: pointer.y,
+            fill: strokeColorRef.current,
+            fontSize: fontSizeRef.current,
+            fontFamily: fontFamilyRef.current,
+            width: 150,
+          });
+          canvas.add(currentObject);
+          canvas.setActiveObject(currentObject);
+          isDrawing = false;
+          break;
+
+        case "eraser":
+          const activeObj = canvas.findTarget(options.e as PointerEvent);
+          if (activeObj && !activeObj.evented) return;
+          if (activeObj) {
+            canvas.remove(activeObj);
+          }
           break;
       }
+    };
 
-      if (!isValid) {
-        objectManager.deleteShapes([currentShape.id]);
+    const handleMouseMove = (options: any) => {
+      if (!isDrawing || !startPoint || !options.pointer) return;
+
+      const pointer = options.pointer;
+
+      if (activeToolRef.current === "eraser") {
+        const activeObj = canvas.findTarget(options.e as PointerEvent);
+        if (activeObj && !activeObj.evented) return;
+        if (activeObj) {
+          canvas.remove(activeObj);
+        }
+        return;
       }
 
-      setShapes(objectManager.getShapes());
-      setSelectedShapes(objectManager.getSelectedShapes());
-    }
+      if (!currentObject) return;
 
-    setIsDrawing(false);
-    setIsPanning(false);
-    setStartPoint(null);
-    setCurrentShape(null);
-  };
+      // Update object dimensions based on mouse movement and type
+      if (currentObject instanceof fabric.Rect) {
+        const rectWidth = pointer.x - startPoint.x;
+        const rectHeight = pointer.y - startPoint.y;
 
-  const handleMouseLeave = () => {
-    handleMouseUp({ preventDefault: () => {} } as React.MouseEvent);
-  };
+        currentObject.set({
+          width: Math.abs(rectWidth),
+          height: Math.abs(rectHeight),
+          left: rectWidth > 0 ? startPoint.x : pointer.x,
+          top: rectHeight > 0 ? startPoint.y : pointer.y,
+        });
+      } else if (currentObject instanceof fabric.Circle) {
+        const dx = pointer.x - startPoint.x;
+        const dy = pointer.y - startPoint.y;
+        const radius = Math.sqrt(dx * dx + dy * dy);
 
-  // Wheel event handler for zooming
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-
-    // Get mouse position relative to canvas
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    // Calculate zoom
-    const zoom = e.deltaY < 0 ? 1.1 : 0.9;
-    const newScale = transform.scale * zoom;
-
-    // Limit zoom level
-    if (newScale < 0.1 || newScale > 10) return;
-
-    // Calculate new transform to zoom toward mouse position
-    const newX = mouseX - (mouseX - transform.x) * zoom;
-    const newY = mouseY - (mouseY - transform.y) * zoom;
-
-    setTransform({
-      x: newX,
-      y: newY,
-      scale: newScale,
-    });
-  };
-
-  // Add these functions near your mouse event handlers (around line 541)
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      e.preventDefault();
-      const touch = e.touches[0];
-      const mouseEvent = {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        button: 0,
-        preventDefault: () => {},
-      } as React.MouseEvent;
-      handleMouseDown(mouseEvent);
-    } else if (e.touches.length === 2) {
-      // Two-finger touch starts panning
-      e.preventDefault();
-      setIsPanning(true);
-      setStartPanPoint({
-        x: e.touches[0].clientX - transform.x,
-        y: e.touches[0].clientY - transform.y,
-      });
-    }
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 1) {
-      e.preventDefault();
-      const touch = e.touches[0];
-      const mouseEvent = {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-        preventDefault: () => {},
-      } as React.MouseEvent;
-      handleMouseMove(mouseEvent);
-    } else if (e.touches.length === 2 && isPanning) {
-      e.preventDefault();
-      // Handle two-finger pan
-      setTransform({
-        ...transform,
-        x: e.touches[0].clientX - startPanPoint.x,
-        y: e.touches[0].clientY - startPanPoint.y,
-      });
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    e.preventDefault();
-    const mouseEvent = {
-      preventDefault: () => {},
-    } as React.MouseEvent;
-    handleMouseUp(mouseEvent);
-  };
-
-  // Double click for text editing
-  // Replace handleDoubleClick (around line 531)
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    const canvasPoint = screenToCanvas(e.clientX, e.clientY);
-    const objectManager = objectManagerRef.current;
-    const hitShape = objectManager.findShapeAtPoint(canvasPoint, context!);
-
-    if (hitShape && hitShape.type === "text") {
-      // Create a temporary input element for better text editing
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = hitShape.text || "";
-      input.style.position = "absolute";
-
-      // Position the input at the text position
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (rect) {
-        const screenX = hitShape.x * transform.scale + transform.x + rect.left;
-        const screenY = hitShape.y * transform.scale + transform.y + rect.top;
-        input.style.left = `${screenX}px`;
-        input.style.top = `${screenY - 20}px`; // Position slightly above text
+        currentObject.set({
+          radius: radius / 2,
+          left: startPoint.x - radius / 2,
+          top: startPoint.y - radius / 2,
+        });
+      } else if (currentObject instanceof fabric.Line) {
+        currentObject.set({
+          x2: pointer.x,
+          y2: pointer.y,
+        });
       }
 
-      input.style.zIndex = "1000";
-      document.body.appendChild(input);
-      input.focus();
+      canvas.renderAll();
+    };
 
-      // Handle saving text on blur or Enter key
-      const saveText = () => {
-        if (input.value) {
-          objectManager.updateShape(hitShape.id, { text: input.value });
-          setShapes(objectManager.getShapes());
+    const handleMouseUp = () => {
+      isDrawing = false;
+
+      if (currentObject) {
+        currentObject.set({ selectable: true });
+
+        // Check if the shape is too small, remove it if it is
+        const isValidObject = isValidShape(currentObject);
+        if (!isValidObject) {
+          canvas.remove(currentObject);
         }
-        document.body.removeChild(input);
-      };
 
-      input.onblur = saveText;
-      input.onkeydown = (evt) => {
-        if (evt.key === "Enter") {
-          saveText();
-        } else if (evt.key === "Escape") {
-          document.body.removeChild(input);
-        }
-      };
-    }
+        currentObject = null;
+      }
+
+      startPoint = null;
+      canvas.renderAll();
+
+      // If not erasing, switch back to select tool
+      if (
+        activeToolRef.current !== "select" &&
+        activeToolRef.current !== "eraser" &&
+        activeToolRef.current !== "freeDraw"
+      ) {
+        setActiveTool("select");
+      }
+    };
+
+    // Add event listeners
+    canvas.on("mouse:down", handleMouseDown);
+    canvas.on("mouse:move", handleMouseMove);
+    canvas.on("mouse:up", handleMouseUp);
+
+    // Return cleanup function
+    return () => {
+      canvas.off("mouse:down", handleMouseDown);
+      canvas.off("mouse:move", handleMouseMove);
+      canvas.off("mouse:up", handleMouseUp);
+    };
   };
 
-  // Delete selected shapes
-  // Improve handleKeyDown (around line 538)
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Prevent handling if input or text area is focused
-    if (
-      document.activeElement instanceof HTMLInputElement ||
-      document.activeElement instanceof HTMLTextAreaElement
-    ) {
-      return;
+  // Check if a shape is valid (not too small)
+  const isValidShape = (obj: fabric.Object): boolean => {
+    if (obj instanceof fabric.Rect) {
+      return obj.width! > 5 && obj.height! > 5;
+    } else if (obj instanceof fabric.Circle) {
+      return obj.radius! > 5;
+    } else if (obj instanceof fabric.Line) {
+      const dx = obj.x2! - obj.x1!;
+      const dy = obj.y2! - obj.y1!;
+      return Math.sqrt(dx * dx + dy * dy) > 5;
     }
-
-    // Delete key for removing selected shapes
-    if (
-      (e.key === "Delete" || e.key === "Backspace") &&
-      selectedShapes.length > 0
-    ) {
-      e.preventDefault();
-      const objectManager = objectManagerRef.current;
-      const selectedIds = selectedShapes.map((shape) => shape.id);
-      objectManager.deleteShapes(selectedIds);
-      setShapes(objectManager.getShapes());
-      setSelectedShapes([]);
-    }
-
-    // Ctrl+A to select all
-    // if (e.key === "a" && (e.ctrlKey || e.metaKey)) {
-    //   e.preventDefault();
-    //   const objectManager = objectManagerRef.current;
-    //   objectManager.selectAll();
-    //   setShapes(objectManager.getShapes());
-    //   setSelectedShapes(objectManager.getSelectedShapes());
-    // }
-
-    // Escape key to deselect
-    if (e.key === "Escape") {
-      e.preventDefault();
-      const objectManager = objectManagerRef.current;
-      objectManager.deselectAll();
-      setShapes(objectManager.getShapes());
-      setSelectedShapes([]);
-      setActiveTool("select");
-    }
+    return true;
   };
 
-  // Context menu handler (prevent default)
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-  };
-
-  // Toolbar handlers
-  const handleToolChange = (tool: Tool) => {
+  // Tool handlers
+  const handleToolChange = useCallback((tool: Tool) => {
     setActiveTool(tool);
+  }, []);
 
-    // Deselect all when changing tools
-    if (tool !== "select") {
-      const objectManager = objectManagerRef.current;
-      objectManager.deselectAll();
-      setShapes(objectManager.getShapes());
-      setSelectedShapes([]);
+  const handleClearCanvas = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    // Clear all objects except grid
+    const objects = canvas.getObjects();
+    objects.forEach((obj) => {
+      // Avoid removing grid lines
+      if (obj.evented !== false) {
+        canvas.remove(obj);
+      }
+    });
+
+    canvas.requestRenderAll();
+  }, []);
+
+  const handleBringToFront = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    const activeObject = canvas.getActiveObject();
+    if (activeObject) {
+      canvas.bringObjectToFront(activeObject);
     }
-  };
+  }, []);
 
-  const handleStrokeColorChange = (color: string) => {
-    setStrokeColor(color);
-  };
+  const handleSendToBack = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
 
-  const handleFillColorChange = (color: string) => {
-    setFillColor(color);
-  };
+    const activeObject = canvas.getActiveObject();
+    if (activeObject) {
+      canvas.sendObjectToBack(activeObject);
 
-  const handleStrokeWidthChange = (width: number) => {
-    setStrokeWidth(width);
-  };
+      // Keep grid at the very back
+      const objects = canvas.getObjects();
+      const gridLines = objects.filter((obj) => !obj.evented);
+      gridLines.forEach((grid) => canvas.sendObjectToBack(grid));
+    }
+  }, []);
 
-  const handleClearCanvas = () => {
-    const objectManager = objectManagerRef.current;
-    objectManager.clearAll();
-    setShapes([]);
-    setSelectedShapes([]);
-  };
+  const handleDuplicate = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
 
-  const handleBringToFront = () => {
-    if (selectedShapes.length === 0) return;
+    const activeObject = canvas.getActiveObject();
+    if (!activeObject) return;
 
-    const objectManager = objectManagerRef.current;
-    const selectedIds = selectedShapes.map((shape) => shape.id);
-    objectManager.bringToFront(selectedIds);
-    setShapes(objectManager.getShapes());
-  };
+    try {
+      // Use cloneAsImage for bitmap objects
+      if (activeObject.type === "image") {
+        (activeObject as any).cloneAsImage((img: fabric.Image) => {
+          img.set({
+            left: (activeObject.left || 0) + 10,
+            top: (activeObject.top || 0) + 10,
+          });
+          canvas.add(img);
+          canvas.setActiveObject(img);
+          canvas.requestRenderAll();
+        });
+        return;
+      }
 
-  const handleSendToBack = () => {
-    if (selectedShapes.length === 0) return;
+      // Use async/await for other object types
+      (async () => {
+        try {
+          // @ts-ignore - clone() returns a Promise in newer Fabric versions
+          const cloned = await (activeObject as any).clone();
+          canvas.discardActiveObject();
 
-    const objectManager = objectManagerRef.current;
-    const selectedIds = selectedShapes.map((shape) => shape.id);
-    objectManager.sendToBack(selectedIds);
-    setShapes(objectManager.getShapes());
-  };
+          cloned.set({
+            left: (cloned.left || 0) + 10,
+            top: (cloned.top || 0) + 10,
+            evented: true,
+          });
+
+          canvas.add(cloned);
+          canvas.setActiveObject(cloned);
+          canvas.requestRenderAll();
+        } catch (error) {
+          console.error("Error cloning object:", error);
+        }
+      })();
+    } catch (error) {
+      console.error("Error in duplicate handler:", error);
+    }
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    if (!canUndo) return;
+    (window as any).canvasUndo();
+  }, [canUndo]);
+
+  const handleRedo = useCallback(() => {
+    if (!canRedo) return;
+    (window as any).canvasRedo();
+  }, [canRedo]);
+
+  const handleSaveCanvas = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    try {
+      // Create a temporary canvas for export (without grid)
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = canvas.width!;
+      tempCanvas.height = canvas.height!;
+      const tempCtx = tempCanvas.getContext("2d");
+
+      if (!tempCtx) return;
+
+      // Fill with white background
+      tempCtx.fillStyle = "#FFFFFF";
+      tempCtx.fillRect(0, 0, canvas.width!, canvas.height!);
+
+      // Draw all objects except grid
+      const objects = canvas.getObjects();
+      const visibleObjects = objects.filter((obj) => obj.evented !== false);
+
+      // Create a temporary Fabric.js canvas
+      const exportCanvas = new fabric.StaticCanvas(undefined, {
+        width: canvas.width,
+        height: canvas.height,
+      });
+
+      // Add visible objects
+      visibleObjects.forEach((obj) => {
+        // Clone the object and add to export canvas
+        obj.clone((cloned: fabric.Object) => {
+          exportCanvas.add(cloned);
+
+          // Check if all objects have been added
+          if (exportCanvas.getObjects().length === visibleObjects.length) {
+            // Export as PNG
+            const dataURL = exportCanvas.toDataURL({
+              multiplier: 1,
+              format: "png",
+              quality: 1,
+            });
+
+            // Create download link
+            const link = document.createElement("a");
+            link.download =
+              "whiteboard-" + new Date().toISOString().slice(0, 10) + ".png";
+            link.href = dataURL;
+            link.click();
+
+            // Clean up
+            exportCanvas.dispose();
+          }
+        });
+      });
+    } catch (error) {
+      console.error("Error saving canvas:", error);
+    }
+  }, []);
+
+  const handleLoadCanvas = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+
+    input.onchange = (e) => {
+      const target = e.target as HTMLInputElement;
+      if (!target.files?.length) return;
+
+      const file = target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = (event) => {
+        if (!event.target?.result) return;
+
+        const canvas = fabricCanvasRef.current;
+        if (!canvas) return;
+
+        try {
+          // Clear current canvas
+          handleClearCanvas();
+
+          // Load from JSON
+          canvas.loadFromJSON(event.target.result.toString(), () => {
+            canvas.requestRenderAll();
+          });
+        } catch (err) {
+          console.error("Error loading canvas:", err);
+          alert(
+            "Could not load the file. It may be corrupted or in the wrong format."
+          );
+        }
+      };
+
+      reader.readAsText(file);
+    };
+
+    input.click();
+  }, [handleClearCanvas]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const canvas = fabricCanvasRef.current;
+      if (!canvas) return;
+
+      // Delete key
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !e.metaKey &&
+        !e.ctrlKey
+      ) {
+        const activeObject = canvas.getActiveObject();
+        if (activeObject) {
+          canvas.remove(activeObject);
+        }
+      }
+
+      // Ctrl+Z or Cmd+Z for undo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+
+      // Ctrl+Shift+Z or Cmd+Shift+Z for redo
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
+        e.preventDefault();
+        handleRedo();
+      }
+
+      // Ctrl+D or Cmd+D for duplicate
+      if ((e.ctrlKey || e.metaKey) && e.key === "d") {
+        e.preventDefault();
+        handleDuplicate();
+      }
+    },
+    [handleUndo, handleRedo, handleDuplicate]
+  );
 
   return (
-    <div className="whiteboard-container">
+    <div
+      className="whiteboard-container"
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+    >
       <div className="toolbar">
-        <div className="tool-group">
-          <button
-            className={`tool-button ${activeTool === "select" ? "active" : ""}`}
-            onClick={() => handleToolChange("select")}
-            title="Select"
-          >
-            <FaMousePointer />
-          </button>
-          <button
-            className={`tool-button ${
-              activeTool === "rectangle" ? "active" : ""
-            }`}
-            onClick={() => handleToolChange("rectangle")}
-            title="Rectangle"
-          >
-            <FaSquare />
-          </button>
-          <button
-            className={`tool-button ${activeTool === "circle" ? "active" : ""}`}
-            onClick={() => handleToolChange("circle")}
-            title="Circle"
-          >
-            <FaCircle />
-          </button>
-          <button
-            className={`tool-button ${activeTool === "line" ? "active" : ""}`}
-            onClick={() => handleToolChange("line")}
-            title="Line"
-          >
-            <FaMinus />
-          </button>
-          <button
-            className={`tool-button ${
-              activeTool === "freeDraw" ? "active" : ""
-            }`}
-            onClick={() => handleToolChange("freeDraw")}
-            title="Free Draw"
-          >
-            <FaPencilAlt />
-          </button>
-          <button
-            className={`tool-button ${activeTool === "text" ? "active" : ""}`}
-            onClick={() => handleToolChange("text")}
-            title="Text"
-          >
-            <FaFont />
-          </button>
-          <button
-            className={`tool-button ${activeTool === "eraser" ? "active" : ""}`}
-            onClick={() => handleToolChange("eraser")}
-            title="Eraser"
-          >
-            <FaEraser />
-          </button>
-        </div>
-
-        <div className="style-group">
-          <div className="color-picker">
-            <label htmlFor="stroke-color">Stroke:</label>
-            <input
-              type="color"
-              id="stroke-color"
-              value={strokeColor}
-              onChange={(e) => handleStrokeColorChange(e.target.value)}
-            />
+        <div className="toolbar-section">
+          <div className="tool-group">
+            <button
+              className={`tool-button ${
+                activeTool === "select" ? "active" : ""
+              }`}
+              onClick={() => handleToolChange("select")}
+              title="Select (V)"
+            >
+              <FaMousePointer />
+            </button>
+            <button
+              className={`tool-button ${
+                activeTool === "rectangle" ? "active" : ""
+              }`}
+              onClick={() => handleToolChange("rectangle")}
+              title="Rectangle (R)"
+            >
+              <FaSquare />
+            </button>
+            <button
+              className={`tool-button ${
+                activeTool === "circle" ? "active" : ""
+              }`}
+              onClick={() => handleToolChange("circle")}
+              title="Circle (C)"
+            >
+              <FaCircle />
+            </button>
+            <button
+              className={`tool-button ${activeTool === "line" ? "active" : ""}`}
+              onClick={() => handleToolChange("line")}
+              title="Line (L)"
+            >
+              <FaMinus />
+            </button>
+            <button
+              className={`tool-button ${
+                activeTool === "freeDraw" ? "active" : ""
+              }`}
+              onClick={() => handleToolChange("freeDraw")}
+              title="Free Draw (P)"
+            >
+              <FaPencilAlt />
+            </button>
+            <button
+              className={`tool-button ${activeTool === "text" ? "active" : ""}`}
+              onClick={() => handleToolChange("text")}
+              title="Text (T)"
+            >
+              <FaFont />
+            </button>
+            <button
+              className={`tool-button ${
+                activeTool === "eraser" ? "active" : ""
+              }`}
+              onClick={() => handleToolChange("eraser")}
+              title="Eraser (E)"
+            >
+              <FaEraser />
+            </button>
           </div>
 
-          <div className="color-picker">
-            <label htmlFor="fill-color">Fill:</label>
-            <input
-              type="color"
-              id="fill-color"
-              value={fillColor === "transparent" ? "#ffffff" : fillColor}
-              onChange={(e) => handleFillColorChange(e.target.value)}
-            />
-            <label>
+          <div className="separator"></div>
+
+          <div className="style-group">
+            <div className="color-picker">
+              <label htmlFor="stroke-color">Stroke:</label>
               <input
-                type="checkbox"
-                checked={fillColor !== "transparent"}
-                onChange={(e) =>
-                  handleFillColorChange(
-                    e.target.checked ? "#ffffff" : "transparent"
-                  )
-                }
+                type="color"
+                id="stroke-color"
+                value={strokeColor}
+                onChange={(e) => setStrokeColor(e.target.value)}
               />
-              Use Fill
-            </label>
-          </div>
+            </div>
 
-          <div className="stroke-width">
-            <label htmlFor="stroke-width">Width:</label>
-            <input
-              type="range"
-              id="stroke-width"
-              min="1"
-              max="20"
-              value={strokeWidth}
-              onChange={(e) =>
-                handleStrokeWidthChange(parseInt(e.target.value))
-              }
-            />
-            <span>{strokeWidth}px</span>
+            <div className="color-picker">
+              <label htmlFor="fill-color">Fill:</label>
+              <input
+                type="color"
+                id="fill-color"
+                value={fillColor === "transparent" ? "#ffffff" : fillColor}
+                onChange={(e) => setFillColor(e.target.value)}
+                disabled={!useFill}
+              />
+              <div className="checkbox-container">
+                <input
+                  type="checkbox"
+                  id="use-fill"
+                  checked={useFill}
+                  onChange={(e) => setUseFill(e.target.checked)}
+                />
+                <label htmlFor="use-fill">Use Fill</label>
+              </div>
+            </div>
+
+            <div className="stroke-width">
+              <label htmlFor="stroke-width">Width:</label>
+              <input
+                type="range"
+                id="stroke-width"
+                min="1"
+                max="20"
+                value={strokeWidth}
+                onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
+              />
+              <span>{strokeWidth}px</span>
+            </div>
+
+            {(activeTool === "text" ||
+              fabricCanvasRef.current?.getActiveObject()?.type ===
+                "textbox") && (
+              <div className="text-controls">
+                <div className="font-size">
+                  <label htmlFor="font-size">Size:</label>
+                  <input
+                    type="number"
+                    id="font-size"
+                    min="8"
+                    max="72"
+                    value={fontSize}
+                    onChange={(e) => setFontSize(parseInt(e.target.value))}
+                  />
+                </div>
+
+                <div className="font-family">
+                  <label htmlFor="font-family">Font:</label>
+                  <select
+                    id="font-family"
+                    value={fontFamily}
+                    onChange={(e) => setFontFamily(e.target.value)}
+                  >
+                    <option value="Arial">Arial</option>
+                    <option value="Helvetica">Helvetica</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Courier New">Courier New</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Verdana">Verdana</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="action-group">
-          <button onClick={handleBringToFront} title="Bring to Front">
-            <FaLevelUpAlt />
-          </button>
-          <button onClick={handleSendToBack} title="Send to Back">
-            <FaLevelDownAlt />
-          </button>
-          <button onClick={handleClearCanvas} title="Clear Canvas">
-            <FaTrash />
-          </button>
+        <div className="toolbar-section">
+          <div className="action-group">
+            <button
+              className={`tool-button ${!canUndo ? "disabled" : ""}`}
+              onClick={handleUndo}
+              title="Undo (Ctrl+Z)"
+              disabled={!canUndo}
+            >
+              <FaUndo />
+            </button>
+            <button
+              className={`tool-button ${!canRedo ? "disabled" : ""}`}
+              onClick={handleRedo}
+              title="Redo (Ctrl+Shift+Z)"
+              disabled={!canRedo}
+            >
+              <FaRedo />
+            </button>
+
+            <div className="separator"></div>
+
+            <button
+              onClick={handleBringToFront}
+              title="Bring to Front"
+              className="tool-button"
+            >
+              <FaLevelUpAlt />
+            </button>
+            <button
+              onClick={handleSendToBack}
+              title="Send to Back"
+              className="tool-button"
+            >
+              <FaLevelDownAlt />
+            </button>
+            <button
+              onClick={handleDuplicate}
+              title="Duplicate (Ctrl+D)"
+              className="tool-button"
+            >
+              <FaClone />
+            </button>
+
+            <div className="separator"></div>
+
+            <button
+              onClick={handleSaveCanvas}
+              title="Export as PNG"
+              className="tool-button"
+            >
+              <FaDownload />
+            </button>
+            <button
+              onClick={handleLoadCanvas}
+              title="Import from JSON"
+              className="tool-button"
+            >
+              <FaUpload />
+            </button>
+            <button
+              onClick={handleClearCanvas}
+              title="Clear Canvas"
+              className="tool-button danger"
+            >
+              <FaTrash />
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="canvas-wrapper" tabIndex={0} onKeyDown={handleKeyDown}>
-        <canvas
-          ref={canvasRef}
-          className="drawing-canvas"
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onWheel={handleWheel}
-          onDoubleClick={handleDoubleClick}
-          onContextMenu={handleContextMenu}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-        />
+      <div className="canvas-wrapper">
+        <canvas ref={canvasRef} />
       </div>
     </div>
   );
