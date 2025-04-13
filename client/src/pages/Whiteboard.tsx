@@ -81,7 +81,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
   // Initialize Fabric canvas
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || fabricCanvasRef.current) return;
 
     // Create new Fabric canvas
     const canvas = new fabric.Canvas(canvasRef.current, {
