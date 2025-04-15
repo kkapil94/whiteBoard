@@ -49,6 +49,38 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   );
   const yArray = ydoc.getArray("fabric-objects");
 
+  provider.on(
+    "status",
+    (event: { status: "connected" | "disconnected" | "connecting" }) => {
+      console.log(`WebSocket is ${event.status}`);
+    }
+  );
+
+  useEffect(() => {
+    const updateCanvasFromYjs = () => {
+      if (yArray.length === 0 || !fabricCanvasRef.current) return;
+
+      const data = yArray.get(0);
+      if (data && fabricCanvasRef.current) {
+        // Temporarily disable sync to avoid loops
+        let tempDisableSync = true;
+
+        fabricCanvasRef.current.loadFromJSON(data, () => {
+          fabricCanvasRef.current?.requestRenderAll();
+          tempDisableSync = false;
+        });
+      }
+    };
+
+    // Observe changes to the Yjs array
+    yArray.observe(updateCanvasFromYjs);
+
+    // Initial sync
+    updateCanvasFromYjs();
+
+    return () => yArray.unobserve(updateCanvasFromYjs);
+  }, []);
+
   // State for toolbar controls
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [strokeColor, setStrokeColor] = useState("#000000");
@@ -90,6 +122,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     useFill,
   ]);
 
+  const syncCanvasToYjs = () => {
+    if (!fabricCanvasRef.current) return;
+    const canvasJson = fabricCanvasRef.current.toJSON();
+
+    // Replace the entire array content with the new canvas state
+    yArray.delete(0, yArray.length);
+    yArray.push([canvasJson]);
+  };
   // Initialize Fabric canvas
   useEffect(() => {
     if (!canvasRef.current || fabricCanvasRef.current) return;
@@ -313,6 +353,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     canvas.on("object:added", saveHistory);
     canvas.on("object:removed", saveHistory);
 
+    syncCanvasToYjs();
+
     // Initial state
     saveHistory();
 
@@ -518,6 +560,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       ) {
         setActiveTool("select");
       }
+      syncCanvasToYjs();
     };
 
     // Add event listeners
@@ -566,7 +609,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     });
 
     canvas.requestRenderAll();
-    yArray.delete(0, yArray.length); // Also clear Yjs shared array
+    syncCanvasToYjs();
   }, []);
 
   const handleBringToFront = useCallback(() => {
@@ -577,6 +620,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     if (activeObject) {
       canvas.bringObjectToFront(activeObject);
     }
+    syncCanvasToYjs();
   }, []);
 
   const handleSendToBack = useCallback(() => {
@@ -592,6 +636,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       const gridLines = objects.filter((obj) => !obj.evented);
       gridLines.forEach((grid) => canvas.sendObjectToBack(grid));
     }
+    syncCanvasToYjs();
   }, []);
 
   const handleDuplicate = useCallback(() => {
@@ -636,6 +681,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
           console.error("Error cloning object:", error);
         }
       })();
+      syncCanvasToYjs();
     } catch (error) {
       console.error("Error in duplicate handler:", error);
     }
@@ -644,11 +690,13 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   const handleUndo = useCallback(() => {
     if (!canUndo) return;
     (window as any).canvasUndo();
+    syncCanvasToYjs();
   }, [canUndo]);
 
   const handleRedo = useCallback(() => {
     if (!canRedo) return;
     (window as any).canvasRedo();
+    syncCanvasToYjs();
   }, [canRedo]);
 
   const handleSaveCanvas = useCallback(() => {
