@@ -1,5 +1,8 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import * as fabric from "fabric";
+import * as Y from "yjs";
+import { WebsocketProvider } from "y-websocket";
+import { v4 as uuidv4 } from "uuid";
 import {
   FaMousePointer,
   FaSquare,
@@ -37,6 +40,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   // Canvas and fabric references
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
+
+  const ydoc = new Y.Doc();
+  const provider = new WebsocketProvider(
+    import.meta.env.VITE_WS_URL,
+    "whiteboard-room",
+    ydoc
+  );
+  const yArray = ydoc.getArray("fabric-objects");
 
   // State for toolbar controls
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -107,6 +118,28 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
     // Setup tool event listeners
     const toolEventCleanup = setupToolEventListeners(canvas);
+
+    canvas.on("path:created", (e) => {
+      const path = e.path.toObject([
+        "path",
+        "left",
+        "top",
+        "stroke",
+        "strokeWidth",
+        "fill",
+      ]);
+      yArray.push([path]); // Add path to Yjs
+    });
+
+    yArray.observe((event) => {
+      event.changes.added.forEach((item) => {
+        item.content.getContent().forEach((obj: any) => {
+          const path = new fabric.Path(obj.path, obj);
+          canvas.add(path);
+          canvas.requestRenderAll();
+        });
+      });
+    });
 
     // On component unmount, dispose canvas
     return () => {
@@ -533,6 +566,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     });
 
     canvas.requestRenderAll();
+    yArray.delete(0, yArray.length); // Also clear Yjs shared array
   }, []);
 
   const handleBringToFront = useCallback(() => {
