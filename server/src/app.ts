@@ -1,9 +1,12 @@
+// @ts-ignore
+import { setupWSConnection } from "y-websocket/bin/utils.js";
+import { WebSocketServer } from "ws";
 import express, { Application, NextFunction, Request, Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import logger from "./utils/logger";
-import { createServer } from "http";
+import http, { createServer } from "http";
 import { Server } from "socket.io";
 import { createAdapter } from "@socket.io/redis-streams-adapter";
 import redis from "./redis";
@@ -15,6 +18,12 @@ const server = createServer(app);
 const io = new Server({
   adapter: createAdapter(redis),
 });
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (ws: WebSocket, req: http.IncomingMessage) => {
+  setupWSConnection(ws, req, { docName: req.url ? req.url.slice(1) : "" }); // docName = room
+});
+
 const morganFormat = ":method :url :status :response-time ms";
 
 app.use(express.json({ limit: "50kb" }));
