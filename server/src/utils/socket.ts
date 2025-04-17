@@ -1,4 +1,5 @@
-// src/socket/socket.ts
+// @ts-ignore
+import { WebsocketServer } from "y-websocket/bin/utils.js";
 import { Server } from "socket.io";
 import {
   createAdapter,
@@ -8,8 +9,6 @@ import Redis from "ioredis";
 import http from "http";
 import { boardService } from "../services/board.service";
 import jwt from "jsonwebtoken";
-import { WebsocketProvider } from "y-websocket";
-import { WebSocketServer } from "ws";
 
 // Create Redis clients
 const pubClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
@@ -118,13 +117,13 @@ export function setupSocketServer(server: http.Server) {
   });
 
   // Setup Y-websocket integration
-  const wsServer = new WebSocketServer({
+  const wsServer = new WebsocketServer({
     server,
     path: "/yjs-ws/",
   });
 
   // Authenticate WebSocket connections for Yjs
-  wsServer.on("connection", async (conn, req) => {
+  wsServer.on("connection", async (conn: WebSocket, req: Request) => {
     try {
       // Extract room ID from URL (e.g., /yjs-ws/board:123)
       const url = new URL(req.url || "", "http://localhost");
@@ -161,8 +160,9 @@ export function setupSocketServer(server: http.Server) {
       }
 
       // Allow connection
-      conn.on("message", (message) => {
+      conn.addEventListener("message", (message) => {
         // Handle Yjs messages
+        console.log(message);
       });
     } catch (error) {
       console.error("WebSocket error:", error);

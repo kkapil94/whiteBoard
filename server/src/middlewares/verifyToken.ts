@@ -5,7 +5,7 @@ interface RequestWithUser extends Request {
   user: any;
 }
 
-const authenticateMiddleware = async (
+export const verifyToken = async (
   req: RequestWithUser,
   res: Response,
   next: any
@@ -38,5 +38,3 @@ const authenticateMiddleware = async (
   // Call the next middleware or route handler
   next();
 };
-
-module.exports = authenticateMiddleware;

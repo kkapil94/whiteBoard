@@ -1,28 +1,18 @@
-// @ts-ignore
-import { setupWSConnection } from "y-websocket/bin/utils.js";
-import { WebSocketServer } from "ws";
 import express, { Application, NextFunction, Request, Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import logger from "./utils/logger";
-import http, { createServer } from "http";
-import { Server } from "socket.io";
-import { createAdapter } from "@socket.io/redis-streams-adapter";
-import redis from "./redis";
+import { createServer } from "http";
+
 import errorMiddleware from "./middlewares/ApiHandler";
 import userRoutes from "./routes/user.route";
+import { setupSocketServer } from "./utils/socket";
 
 const app: Application = express();
 const server = createServer(app);
-const io = new Server({
-  adapter: createAdapter(redis),
-});
-const wss = new WebSocketServer({ server });
 
-wss.on("connection", (ws: WebSocket, req: http.IncomingMessage) => {
-  setupWSConnection(ws, req, { docName: req.url ? req.url.slice(1) : "" }); // docName = room
-});
+setupSocketServer(server);
 
 const morganFormat = ":method :url :status :response-time ms";
 
