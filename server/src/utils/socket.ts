@@ -1,5 +1,5 @@
 // @ts-ignore
-import { WebsocketServer } from "y-websocket/bin/utils.js";
+import { WebsocketProvider } from "y-websocket/bin/utils";
 import { Server } from "socket.io";
 import {
   createAdapter,
@@ -9,6 +9,7 @@ import Redis from "ioredis";
 import http from "http";
 import { boardService } from "../services/board.service";
 import jwt from "jsonwebtoken";
+import { WebSocketServer } from "ws";
 
 // Create Redis clients
 const pubClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
@@ -117,7 +118,7 @@ export function setupSocketServer(server: http.Server) {
   });
 
   // Setup Y-websocket integration
-  const wsServer = new WebsocketServer({
+  const wsServer = new WebSocketServer({
     server,
     path: "/yjs-ws/",
   });
