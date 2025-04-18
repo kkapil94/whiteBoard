@@ -7,6 +7,7 @@ import { createServer } from "http";
 
 import errorMiddleware from "./middlewares/ApiHandler";
 import userRoutes from "./routes/user.route";
+import boardRoutes from "./routes/board.route";
 import { setupSocketServer } from "./utils/socket";
 
 const app: Application = express();
@@ -42,6 +43,7 @@ app.get("/api/v1", (req: Request, res: Response, next: NextFunction) => {
   });
 });
 app.use("/api/v1/user", userRoutes);
+app.use("/api/v1/boards", boardRoutes);
 
 app.all("*", (req: Request, res: Response) => {
   res.status(404).json({

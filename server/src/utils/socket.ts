@@ -1,5 +1,3 @@
-// @ts-ignore
-import { WebsocketProvider } from "y-websocket/bin/utils";
 import { Server } from "socket.io";
 import {
   createAdapter,
