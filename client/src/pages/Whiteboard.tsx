@@ -172,15 +172,15 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     });
 
     yArray.observe((event) => {
+      if (event.transaction.local) return;
       event.changes.added.forEach((item) => {
         item.content.getContent().forEach((obj: any) => {
           const path = new fabric.Path(obj.path, obj);
-          canvas.add(path);
+          canvas.add(path); // This creates a duplicate
           canvas.requestRenderAll();
         });
       });
     });
-
     // On component unmount, dispose canvas
     return () => {
       historyCleanup();
@@ -201,7 +201,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
     // Deselect objects when changing tools (except when selecting)
     if (activeTool !== "select") {
-      canvas.discardActiveObject();
+      // canvas.discardActiveObject();
       canvas.requestRenderAll();
     }
 
@@ -415,6 +415,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       // Skip if not left mouse button
       // @ts-ignore - e exists on options.e
       if (options.e?.button !== undefined && options.e?.button !== 0) return;
+
+      if (activeToolRef.current === "select" && options.target) {
+        return; // Let fabric.js handle selection
+      }
 
       const pointer = options.pointer;
       startPoint = { x: pointer.x, y: pointer.y };
@@ -666,7 +670,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
         try {
           // @ts-ignore - clone() returns a Promise in newer Fabric versions
           const cloned = await (activeObject as any).clone();
-          canvas.discardActiveObject();
+          // canvas.discardActiveObject();
 
           cloned.set({
             left: (cloned.left || 0) + 10,
