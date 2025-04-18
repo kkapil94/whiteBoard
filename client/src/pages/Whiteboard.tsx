@@ -1,8 +1,16 @@
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import * as fabric from "fabric";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { v4 as uuidv4 } from "uuid";
+import { debounce } from "lodash";
+
 import {
   FaMousePointer,
   FaSquare,
@@ -41,45 +49,73 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
 
-  const ydoc = new Y.Doc();
-  const provider = new WebsocketProvider(
-    import.meta.env.VITE_WS_URL,
-    "whiteboard-room",
-    ydoc
-  );
-  const yArray = ydoc.getArray("fabric-objects");
+  // Initialize Y.js and WebSocket connection
+  const ydoc = useMemo(() => new Y.Doc(), []);
+  const [isConnected, setIsConnected] = useState(false);
 
-  provider.on(
-    "status",
-    (event: { status: "connected" | "disconnected" | "connecting" }) => {
-      console.log(`WebSocket is ${event.status}`);
-    }
+  const provider = useMemo(
+    () =>
+      new WebsocketProvider(
+        import.meta.env.VITE_WS_URL || "ws://localhost:1234",
+        "whiteboard-room",
+        ydoc,
+        { connect: true }
+      ),
+    [ydoc]
   );
 
+  const yArray = useMemo(() => ydoc.getArray("fabric-objects"), [ydoc]);
+
+  // Handle WebSocket connection status
+  useEffect(() => {
+    const handleStatus = ({ status }: { status: string }) => {
+      console.log(`WebSocket is ${status}`);
+      setIsConnected(status === "connected");
+    };
+
+    provider.on("status", handleStatus);
+
+    // Try reconnecting if connection fails
+    const reconnectInterval = setInterval(() => {
+      if (!isConnected) {
+        provider.connect();
+      }
+    }, 5000);
+
+    return () => {
+      provider.off("status", handleStatus);
+      clearInterval(reconnectInterval);
+      provider.destroy();
+    };
+  }, [provider, isConnected]);
+
+  // Update canvas when receiving changes
   useEffect(() => {
     const updateCanvasFromYjs = () => {
-      if (yArray.length === 0 || !fabricCanvasRef.current) return;
+      if (!fabricCanvasRef.current) return;
 
-      const data = yArray.get(0);
-      if (data && fabricCanvasRef.current) {
-        // Temporarily disable sync to avoid loops
-        let tempDisableSync = true;
+      try {
+        const data = yArray.get(0);
+        if (!data) return;
 
         fabricCanvasRef.current.loadFromJSON(data, () => {
           fabricCanvasRef.current?.requestRenderAll();
-          tempDisableSync = false;
+          // Make sure objects are selectable after loading
+          if (fabricCanvasRef.current) {
+            fabricCanvasRef.current.getObjects().forEach((obj) => {
+              obj.selectable = true;
+              obj.evented = true;
+            });
+          }
         });
+      } catch (error) {
+        console.error("Error updating canvas from Yjs:", error);
       }
     };
 
-    // Observe changes to the Yjs array
     yArray.observe(updateCanvasFromYjs);
-
-    // Initial sync
-    updateCanvasFromYjs();
-
     return () => yArray.unobserve(updateCanvasFromYjs);
-  }, []);
+  }, [yArray]);
 
   // State for toolbar controls
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -122,66 +158,67 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     useFill,
   ]);
 
-  const syncCanvasToYjs = () => {
-    if (!fabricCanvasRef.current) return;
-    const canvasJson = fabricCanvasRef.current.toJSON();
+  // Debounced sync function
+  const debouncedSync = useMemo(
+    () =>
+      debounce((canvas: fabric.Canvas) => {
+        const canvasJson = canvas.toJSON();
+        yArray.delete(0, yArray.length);
+        yArray.push([canvasJson]);
+      }, 300),
+    []
+  );
 
-    // Replace the entire array content with the new canvas state
-    yArray.delete(0, yArray.length);
-    yArray.push([canvasJson]);
-  };
-  // Initialize Fabric canvas
-  useEffect(() => {
+  // Memoized sync function
+  const syncCanvasToYjs = useCallback(() => {
+    if (!fabricCanvasRef.current || !isConnected) return;
+
+    try {
+      const canvasJson = fabricCanvasRef.current.toJSON();
+      yArray.delete(0, yArray.length);
+      yArray.push([canvasJson]);
+    } catch (error) {
+      console.error("Error syncing to Yjs:", error);
+    }
+  }, [yArray, isConnected]);
+
+  // Optimize canvas initialization
+  const initializeCanvas = useCallback(() => {
     if (!canvasRef.current || fabricCanvasRef.current) return;
 
-    // Create new Fabric canvas
     const canvas = new fabric.Canvas(canvasRef.current, {
       width,
       height,
       backgroundColor: "#ffffff",
       preserveObjectStacking: true,
       selection: true,
+      selectionBorderColor: "#1890ff",
+      selectionColor: "rgba(100, 100, 255, 0.3)",
+      selectionLineWidth: 1,
+      targetFindTolerance: 5,
+      perPixelTargetFind: false,
+      interactive: true,
     });
 
     fabricCanvasRef.current = canvas;
 
-    // Set default selection style
-    canvas.selectionColor = "rgba(100, 100, 255, 0.3)";
-    canvas.selectionBorderColor = "#1890ff";
-    canvas.selectionLineWidth = 1;
+    // Make all objects selectable by default
+    canvas.on("object:added", (e) => {
+      if (e.target) {
+        e.target.set({
+          selectable: true,
+          evented: true,
+          hasControls: true,
+          hasBorders: true,
+        });
+      }
+      canvas.requestRenderAll();
+    });
 
-    // Add grid background
-    // drawGrid(canvas);
-
-    // Setup event listeners for history management
+    // Setup other event listeners
     const historyCleanup = setupHistoryManagement(canvas);
-
-    // Setup tool event listeners
     const toolEventCleanup = setupToolEventListeners(canvas);
 
-    canvas.on("path:created", (e) => {
-      const path = e.path.toObject([
-        "path",
-        "left",
-        "top",
-        "stroke",
-        "strokeWidth",
-        "fill",
-      ]);
-      yArray.push([path]); // Add path to Yjs
-    });
-
-    yArray.observe((event) => {
-      if (event.transaction.local) return;
-      event.changes.added.forEach((item) => {
-        item.content.getContent().forEach((obj: any) => {
-          const path = new fabric.Path(obj.path, obj);
-          canvas.add(path); // This creates a duplicate
-          canvas.requestRenderAll();
-        });
-      });
-    });
-    // On component unmount, dispose canvas
     return () => {
       historyCleanup();
       toolEventCleanup();
@@ -190,218 +227,162 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     };
   }, [width, height]);
 
-  // Handle active tool changes
+  useEffect(() => {
+    const cleanup = initializeCanvas();
+    return () => cleanup?.();
+  }, [initializeCanvas]);
+
+  // Optimize tool changes
+  const setObjectProperties = useCallback(
+    (canvas: fabric.Canvas, selectable: boolean) => {
+      const objects = canvas.getObjects();
+      canvas.discardActiveObject();
+
+      // Batch object updates
+      canvas.renderOnAddRemove = false;
+      objects.forEach((obj) => {
+        if (obj.type !== "group") {
+          obj.set({
+            selectable,
+            evented: true,
+            hasControls: selectable,
+            hasBorders: selectable,
+            lockMovementX: !selectable,
+            lockMovementY: !selectable,
+          });
+        }
+      });
+      canvas.renderOnAddRemove = true;
+      canvas.requestRenderAll();
+    },
+    []
+  );
+
+  // Optimize active tool changes
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
-    // Reset canvas mode
-    canvas.isDrawingMode = false;
-    canvas.selection = true;
+    const configureCanvasForTool = () => {
+      canvas.isDrawingMode = false;
+      canvas.selection = activeTool === "select";
+      canvas.defaultCursor = activeTool === "select" ? "default" : "crosshair";
+      canvas.hoverCursor = activeTool === "select" ? "move" : "crosshair";
 
-    // Deselect objects when changing tools (except when selecting)
-    if (activeTool !== "select") {
-      // canvas.discardActiveObject();
-      canvas.requestRenderAll();
-    }
-
-    // Configure canvas based on active tool
-    switch (activeTool) {
-      case "select":
-        canvas.selection = true;
-        break;
-
-      case "freeDraw":
+      if (activeTool === "freeDraw") {
         canvas.isDrawingMode = true;
-
         if (!canvas.freeDrawingBrush) {
           canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
         }
-
-        const brush = canvas.freeDrawingBrush;
-        brush.color = strokeColor;
-        brush.width = strokeWidth;
-        break;
-
-      case "eraser":
-        canvas.selection = false;
-        break;
-
-      default:
-        canvas.selection = false;
-        break;
-    }
-  }, [activeTool, strokeColor, strokeWidth]);
-
-  // Handle color and style changes
-  useEffect(() => {
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-
-    // Update free drawing brush
-    if (canvas.isDrawingMode) {
-      const brush = canvas.freeDrawingBrush;
-      if (brush) {
-        brush.color = strokeColor;
-        brush.width = strokeWidth;
-      }
-    }
-
-    // Update active object if any
-    const activeObject = canvas.getActiveObject();
-    if (activeObject) {
-      if (
-        activeObject.type !== "textbox" &&
-        activeObject.stroke !== undefined
-      ) {
-        activeObject.set("stroke", strokeColor);
+        canvas.freeDrawingBrush.color = strokeColor;
+        canvas.freeDrawingBrush.width = strokeWidth;
       }
 
-      if (activeObject.type !== "textbox" && activeObject.fill !== undefined) {
-        activeObject.set("fill", useFill ? fillColor : "transparent");
-      }
-
-      if (activeObject.type === "textbox") {
-        activeObject.set("fill", strokeColor);
-        activeObject.set("fontSize", fontSize);
-        activeObject.set("fontFamily", fontFamily);
-      }
-
-      if (activeObject.strokeWidth !== undefined) {
-        activeObject.set("strokeWidth", strokeWidth);
-      }
-
-      canvas.requestRenderAll();
-    }
-  }, [strokeColor, fillColor, strokeWidth, useFill, fontSize, fontFamily]);
-
-  // Draw grid pattern on canvas
-  // const drawGrid = (canvas: fabric.Canvas) => {
-  //   const gridSize = 20;
-  //   const gridLines: fabric.Line[] = [];
-
-  //   // Create vertical lines
-  //   for (let i = gridSize; i < width; i += gridSize) {
-  //     gridLines.push(
-  //       new fabric.Line([i, 0, i, height], {
-  //         stroke: "#e0e0e0",
-  //         selectable: false,
-  //         evented: false,
-  //         strokeWidth: 0.5,
-  //       })
-  //     );
-  //   }
-
-  //   // Create horizontal lines
-  //   for (let i = gridSize; i < height; i += gridSize) {
-  //     gridLines.push(
-  //       new fabric.Line([0, i, width, i], {
-  //         stroke: "#e0e0e0",
-  //         selectable: false,
-  //         evented: false,
-  //         strokeWidth: 0.5,
-  //       })
-  //     );
-  //   }
-
-  //   // Add all grid lines to canvas
-  //   const gridGroup = new fabric.Group(gridLines, {
-  //     selectable: false,
-  //     evented: false,
-  //     lockMovementX: true,
-  //     lockMovementY: true,
-  //     lockScalingX: true,
-  //     lockScalingY: true,
-  //     lockRotation: true,
-  //   });
-
-  //   canvas.add(gridGroup);
-  //   canvas.sendObjectToBack(gridGroup);
-  // };
-
-  // Setup history management (undo/redo)
-  const setupHistoryManagement = (canvas: fabric.Canvas) => {
-    let history: string[] = [];
-    let currentStateIndex = -1;
-    let isRedoing = false;
-    let isSaving = false;
-
-    const saveHistory = () => {
-      if (isRedoing || isSaving) return;
-
-      isSaving = true;
-
-      // If we're not at the end of the history array, remove everything after current state
-      if (currentStateIndex < history.length - 1) {
-        history = history.slice(0, currentStateIndex + 1);
-      }
-
-      // Save current state
-      const json = JSON.stringify(canvas);
-      history.push(json);
-      currentStateIndex = history.length - 1;
-
-      // Update buttons state
-      setCanUndo(currentStateIndex > 0);
-      setCanRedo(currentStateIndex < history.length - 1);
-
-      isSaving = false;
+      setObjectProperties(canvas, activeTool === "select");
     };
 
-    // Save state on object modifications
-    canvas.on("object:modified", saveHistory);
-    canvas.on("object:added", saveHistory);
-    canvas.on("object:removed", saveHistory);
+    configureCanvasForTool();
+  }, [activeTool, strokeColor, strokeWidth, setObjectProperties]);
 
-    syncCanvasToYjs();
+  // Optimize history management
+  const setupHistoryManagement = useCallback(
+    (canvas: fabric.Canvas) => {
+      let history: string[] = [];
+      let currentStateIndex = -1;
+      let isRedoing = false;
+      let isSaving = false;
 
-    // Initial state
-    saveHistory();
+      const saveState = () => {
+        if (isRedoing || isSaving) return;
+        isSaving = true;
 
-    // Expose undo/redo methods
-    const canvasUndo = () => {
-      if (currentStateIndex <= 0) return;
+        try {
+          // Remove any states after current index
+          if (currentStateIndex < history.length - 1) {
+            history = history.slice(0, currentStateIndex + 1);
+          }
 
-      isRedoing = true;
-      currentStateIndex--;
+          const canvasState = JSON.stringify(canvas.toJSON());
+          history.push(canvasState);
+          currentStateIndex++;
 
-      const json = history[currentStateIndex];
-      canvas.loadFromJSON(json, () => {
-        canvas.requestRenderAll();
-        isRedoing = false;
-        setCanUndo(currentStateIndex > 0);
-        setCanRedo(currentStateIndex < history.length - 1);
+          setCanUndo(currentStateIndex > 0);
+          setCanRedo(currentStateIndex < history.length - 1);
+        } catch (error) {
+          console.error("Error saving state:", error);
+        } finally {
+          isSaving = false;
+        }
+      };
+
+      const canvasUndo = () => {
+        if (currentStateIndex <= 0) return;
+
+        isRedoing = true;
+        try {
+          currentStateIndex--;
+          const state = JSON.parse(history[currentStateIndex]);
+
+          canvas.loadFromJSON(state, () => {
+            canvas.renderAll();
+            setCanUndo(currentStateIndex > 0);
+            setCanRedo(true);
+            syncCanvasToYjs();
+          });
+        } catch (error) {
+          console.error("Error during undo:", error);
+        } finally {
+          isRedoing = false;
+        }
+      };
+
+      const canvasRedo = () => {
+        if (currentStateIndex >= history.length - 1) return;
+
+        isRedoing = true;
+        try {
+          currentStateIndex++;
+          const state = JSON.parse(history[currentStateIndex]);
+
+          canvas.loadFromJSON(state, () => {
+            canvas.renderAll();
+            setCanUndo(true);
+            setCanRedo(currentStateIndex < history.length - 1);
+            syncCanvasToYjs();
+          });
+        } catch (error) {
+          console.error("Error during redo:", error);
+        } finally {
+          isRedoing = false;
+        }
+      };
+
+      // Save initial state
+      saveState();
+
+      // Setup event listeners for state changes
+      const events = ["object:added", "object:modified", "object:removed"];
+      events.forEach((event) => {
+        canvas.on(event as any, () => {
+          if (!isRedoing) {
+            saveState();
+          }
+        });
       });
-    };
 
-    const canvasRedo = () => {
-      if (currentStateIndex >= history.length - 1) return;
+      // Expose undo/redo methods globally
+      (window as any).canvasUndo = canvasUndo;
+      (window as any).canvasRedo = canvasRedo;
 
-      isRedoing = true;
-      currentStateIndex++;
-
-      const json = history[currentStateIndex];
-      canvas.loadFromJSON(json, () => {
-        canvas.requestRenderAll();
-        isRedoing = false;
-        setCanUndo(currentStateIndex > 0);
-        setCanRedo(currentStateIndex < history.length - 1);
-      });
-    };
-
-    // Assign to window for external access
-    (window as any).canvasUndo = canvasUndo;
-    (window as any).canvasRedo = canvasRedo;
-
-    // Return cleanup function
-    return () => {
-      canvas.off("object:modified", saveHistory);
-      canvas.off("object:added", saveHistory);
-      canvas.off("object:removed", saveHistory);
-      delete (window as any).canvasUndo;
-      delete (window as any).canvasRedo;
-    };
-  };
+      // Return cleanup function
+      return () => {
+        events.forEach((event) => canvas.off(event as any));
+        delete (window as any).canvasUndo;
+        delete (window as any).canvasRedo;
+      };
+    },
+    [syncCanvasToYjs]
+  );
 
   // Setup event listeners for tools
   const setupToolEventListeners = (canvas: fabric.Canvas) => {
@@ -413,18 +394,21 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       if (!options.pointer) return;
 
       // Skip if not left mouse button
-      // @ts-ignore - e exists on options.e
       if (options.e?.button !== undefined && options.e?.button !== 0) return;
 
-      if (activeToolRef.current === "select" && options.target) {
+      if (activeToolRef.current === "select") {
+        canvas.forEachObject((obj) => {
+          obj.selectable = true;
+          obj.evented = true;
+          obj.hasControls = true;
+          obj.hasBorders = true;
+        });
         return; // Let fabric.js handle selection
       }
 
       const pointer = options.pointer;
       startPoint = { x: pointer.x, y: pointer.y };
       isDrawing = true;
-
-      if (activeToolRef.current === "select") return;
 
       // Create new objects based on tool
       switch (activeToolRef.current) {
@@ -496,6 +480,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
       const pointer = options.pointer;
 
+      if (activeToolRef.current === "select") return;
+
       if (activeToolRef.current === "eraser") {
         const activeObj = canvas.findTarget(options.e as PointerEvent);
         if (activeObj && !activeObj.evented) return;
@@ -542,7 +528,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       isDrawing = false;
 
       if (currentObject) {
-        currentObject.set({ selectable: true });
+        currentObject.set({
+          selectable: activeToolRef.current === "select",
+          evented: true,
+        });
 
         // Check if the shape is too small, remove it if it is
         const isValidObject = isValidShape(currentObject);
@@ -554,7 +543,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       }
 
       startPoint = null;
-      canvas.renderAll();
+      canvas.requestRenderAll();
 
       // If not erasing, switch back to select tool
       if (
@@ -567,6 +556,25 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       syncCanvasToYjs();
     };
 
+    // Handle selection events
+    canvas.on("selection:created", () => {
+      if (activeToolRef.current === "select") {
+        canvas.forEachObject((obj) => {
+          obj.selectable = true;
+          obj.evented = true;
+        });
+      }
+    });
+
+    canvas.on("selection:cleared", () => {
+      if (activeToolRef.current === "select") {
+        canvas.forEachObject((obj) => {
+          obj.selectable = true;
+          obj.evented = true;
+        });
+      }
+    });
+
     // Add event listeners
     canvas.on("mouse:down", handleMouseDown);
     canvas.on("mouse:move", handleMouseMove);
@@ -577,6 +585,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       canvas.off("mouse:down", handleMouseDown);
       canvas.off("mouse:move", handleMouseMove);
       canvas.off("mouse:up", handleMouseUp);
+      canvas.off("selection:created");
+      canvas.off("selection:cleared");
     };
   };
 
@@ -693,14 +703,20 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
   const handleUndo = useCallback(() => {
     if (!canUndo) return;
-    (window as any).canvasUndo();
-    syncCanvasToYjs();
+    try {
+      (window as any).canvasUndo?.();
+    } catch (error) {
+      console.error("Error in handleUndo:", error);
+    }
   }, [canUndo]);
 
   const handleRedo = useCallback(() => {
     if (!canRedo) return;
-    (window as any).canvasRedo();
-    syncCanvasToYjs();
+    try {
+      (window as any).canvasRedo?.();
+    } catch (error) {
+      console.error("Error in handleRedo:", error);
+    }
   }, [canRedo]);
 
   const handleSaveCanvas = useCallback(() => {
@@ -1062,4 +1078,4 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   );
 };
 
-export default Whiteboard;
+export default React.memo(Whiteboard);
