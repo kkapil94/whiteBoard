@@ -15,7 +15,7 @@ interface AuthState {
 
 const initialState: AuthState = {
   user: null,
-  token: null,
+  token: localStorage.getItem("token") || null,
   isAuthenticated: false,
 };
 
@@ -28,6 +28,10 @@ const authSlice = createSlice({
       action: PayloadAction<{ user: User; token: string }>
     ) => {
       const { user, token } = action.payload;
+      if (user) {
+        const stringifiedUser = JSON.stringify(user);
+        localStorage.setItem("user", stringifiedUser);
+      }
       state.user = user;
       state.token = token;
       state.isAuthenticated = true;

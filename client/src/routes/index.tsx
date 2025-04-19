@@ -9,18 +9,19 @@ import Login from "../pages/Login";
 import { Toaster } from "sonner";
 import { Signup } from "@/pages/SignUp";
 import AuthLayout from "@/layouts/AuthLayout";
+import BoardLayout from "@/layouts/BoardLayout";
+import Dashboard from "@/pages/Dashboard";
 import Whiteboard from "@/pages/Whiteboard";
-// import MainLayout from "../layouts/MainLayout";
-// import DashboardLayout from "../layouts/DashboardLayout";
-// import ProtectedRoute from "./ProtectedRoute"; // Auth-based route protection
-// import Loader from "../components/Loader"; // Fallback loader
 
-// Lazy-loaded pages for better performance
-// const Home = lazy(() => import("../pages/Home"));
-// const About = lazy(() => import("../pages/About"));
-// const Dashboard = lazy(() => import("../pages/Dashboard"));
-// const Login = lazy(() => import("../pages/Login"));
-// const NotFound = lazy(() => import("../pages/NotFound"));
+// Protected route component
+const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
+  const token = localStorage.getItem("token");
+  if (!token) {
+    // If not authenticated, redirect to login
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+};
 
 const AppRoutes = () => {
   const [canvasWidth, setCanvasWidth] = useState(window.innerWidth);
@@ -36,17 +37,38 @@ const AppRoutes = () => {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
   return (
     <>
       <Router>
         <Routes>
+          {/* Auth routes */}
           <Route element={<AuthLayout />}>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Signup />} />
           </Route>
+
+          {/* Dashboard and board management */}
           <Route
-            path="/"
-            element={<Whiteboard width={canvasWidth} height={canvasHeight} />}
+            element={
+              <ProtectedRoute>
+                <BoardLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/dashboard" element={<Dashboard />} />
+            {/* Redirect root to dashboard */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          </Route>
+
+          {/* Individual whiteboard route */}
+          <Route
+            path="/board/:boardId"
+            element={
+              <ProtectedRoute>
+                <Whiteboard width={canvasWidth} height={canvasHeight} />
+              </ProtectedRoute>
+            }
           />
         </Routes>
       </Router>
