@@ -6,6 +6,8 @@ import { asyncHandler } from "../utils/asyncHandler";
 interface AuthenticatedRequest extends Request {
   user: {
     id: string;
+    email: string;
+    role: string;
   };
 }
 
@@ -26,7 +28,8 @@ export const createBoard = asyncHandler(
 // Get all boards for the current user
 export const getUserBoards = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
-    const userId = req.user.id;
+    console.log(req.user);
+    const userId = req.user?.id;
     const boards = await boardService.getUserBoards(userId);
     return res.json(boards);
   }

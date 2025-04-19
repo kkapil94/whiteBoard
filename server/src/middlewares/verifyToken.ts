@@ -1,40 +1,41 @@
+import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { Request, Response } from "express";
 
-interface RequestWithUser extends Request {
-  user: any;
+// Define the JWT payload type
+interface JWTPayload {
+  id: string;
+  email: string;
+  role: string;
 }
 
-export const verifyToken = async (
-  req: RequestWithUser,
+// Extend Express Request type to include user
+declare global {
+  namespace Express {
+    interface Request {
+      user?: JWTPayload;
+    }
+  }
+}
+
+export const verifyToken = (
+  req: Request,
   res: Response,
-  next: any
-) => {
-  // Get the authorization header
+  next: NextFunction
+): void => {
   const authHeader = req.header("Authorization");
 
-  // Check if the header is present and has a valid format
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).send({ error: "Unauthorized" });
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
-  // Extract the token from the header
   const token = authHeader.substring(7);
 
-  // Verify the token using a secret key
   try {
-    const decoded = jwt.verify(token, process.env.SECRET_KEY!);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
     req.user = decoded;
+    next();
   } catch (err) {
-    return res.status(401).send({ error: "Invalid token" });
+    res.status(401).json({ error: "Invalid token" });
   }
-
-  // Decode the request body
-  const decodedBody = JSON.parse(req.body);
-
-  // Return the decoded data
-  res.locals.decodedData = decodedBody;
-
-  // Call the next middleware or route handler
-  next();
 };

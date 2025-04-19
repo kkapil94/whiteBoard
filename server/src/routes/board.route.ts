@@ -9,8 +9,12 @@ import {
   removeMemberFromBoard,
   updateBoardName,
 } from "../controllers/board.controller";
+import { verifyToken } from "../middlewares/verifyToken";
 
 const router = express.Router();
+
+// Apply verifyToken middleware to all routes
+router.use(verifyToken);
 
 // Board CRUD routes
 router.post("/", createBoard);
