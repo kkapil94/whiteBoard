@@ -4,6 +4,7 @@ interface User {
   id: string;
   email: string;
   fullName: string;
+  username: string;
 }
 
 interface AuthState {
@@ -30,11 +31,13 @@ const authSlice = createSlice({
       state.user = user;
       state.token = token;
       state.isAuthenticated = true;
+      localStorage.setItem("token", token);
     },
     logout: (state) => {
       state.user = null;
       state.token = null;
       state.isAuthenticated = false;
+      localStorage.removeItem("token");
     },
     updateUser: (state, action: PayloadAction<Partial<User>>) => {
       if (state.user) {

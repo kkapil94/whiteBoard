@@ -64,7 +64,10 @@ function Login() {
       console.log({ data });
       // Remove confirmPassword before sending to API
       const result = await login(data).unwrap();
-      dispatch(setCredentials(result));
+
+      dispatch(
+        setCredentials({ user: result.user, token: result.accessToken })
+      );
 
       toast("Account created successfully", {
         description: "Welcome to Whiteboard!",
