@@ -1,32 +1,61 @@
 import { Server } from "socket.io";
-import {
-  createAdapter,
-  RedisStreamsAdapterOptions,
-} from "@socket.io/redis-streams-adapter";
+import { createAdapter } from "@socket.io/redis-streams-adapter";
 import Redis from "ioredis";
-import http from "http";
+import http, { IncomingMessage } from "http";
 import { boardService } from "../services/board.service";
 import jwt from "jsonwebtoken";
-import { WebSocketServer } from "ws";
-
-// Create Redis clients
-const pubClient = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-const subClient = pubClient.duplicate() as RedisStreamsAdapterOptions;
+import { WebSocket, WebSocketServer } from "ws";
 
 interface DecodedUser {
   id: string;
+  username?: string;
 }
 
-const verifyToken = (token: string) => {
+interface RoomClient {
+  ws: WebSocket;
+  userId: string;
+  lastPing: number;
+}
+
+// Redis setup with error handling
+const setupRedis = () => {
+  const pubClient = new Redis(
+    process.env.REDIS_URL || "redis://localhost:6379"
+  );
+  const subClient = pubClient.duplicate() as any;
+
+  [pubClient, subClient].forEach((client) => {
+    client.on("error", (err: any) => {
+      console.error("Redis error:", err);
+    });
+  });
+
+  return { pubClient, subClient };
+};
+
+const verifyToken = (token: string): DecodedUser | null => {
   try {
-    const decoded = jwt.verify(token, process.env.SECRET_KEY!) as DecodedUser;
-    return decoded;
+    // Clean up token if needed
+    const newToken = token.split("/")[0];
+    console.log("Verifying token:", {
+      newToken: newToken.substring(0, 20) + "...",
+    });
+
+    const data = jwt.verify(newToken, process.env.JWT_SECRET!) as DecodedUser;
+    console.log("Token verified successfully for user:", data.id);
+    return data;
   } catch (err) {
-    console.log(err);
+    console.error("Token verification failed:", err);
+    return null;
   }
 };
 
 export function setupSocketServer(server: http.Server) {
+  console.log("Setting up WebSocket server...");
+  const { pubClient, subClient } = setupRedis();
+  const rooms = new Map<string, Set<RoomClient>>();
+
+  // Setup Socket.io
   const io = new Server(server, {
     cors: {
       origin: process.env.FRONTEND_URL || "http://localhost:5173",
@@ -35,138 +64,173 @@ export function setupSocketServer(server: http.Server) {
     },
   });
 
-  // Apply Redis adapter
   io.adapter(createAdapter(pubClient, subClient));
 
-  // Authentication middleware
-  io.use(async (socket, next) => {
-    try {
-      const token = socket.handshake.auth.token;
-      if (!token) {
-        return next(new Error("Authentication error"));
-      }
+  // Setup Y-websocket server - MODIFIED CONFIG
+  const wsServer = new WebSocketServer({
+    noServer: true, // Change to noServer
+    perMessageDeflate: false,
+  });
 
-      const decoded = verifyToken(token);
-      if (!decoded) {
-        return next(new Error("Invalid token"));
-      }
+  // Handle upgrade requests
+  server.on("upgrade", (request, socket, head) => {
+    const pathname = new URL(request.url!, `http://${request.headers.host}`)
+      .pathname;
 
-      // Store user data in socket
-      socket.data.user = decoded;
-      next();
-    } catch (error) {
-      next(new Error("Authentication error"));
+    if (pathname.startsWith("/yjs-ws/")) {
+      wsServer.handleUpgrade(request, socket, head, (ws) => {
+        console.log("Upgrade successful, emitting connection event");
+        wsServer.emit("connection", ws, request);
+      });
+    } else {
+      socket.destroy();
     }
   });
 
-  // Handle connections
-  io.on("connection", (socket) => {
-    console.log("User connected:", socket.data.user.id);
+  // Log total connections
+  setInterval(() => {
+    const totalClients = Array.from(rooms.values()).reduce(
+      (acc, room) => acc + room.size,
+      0
+    );
+    console.log(`Active WebSocket connections: ${totalClients}`);
+  }, 30000);
 
-    // Handle joining a board room
-    socket.on("join-board", async (boardId) => {
-      try {
-        const userId = socket.data.user.id;
-
-        // Check if user is a member of this board
-        const isMember = await boardService.isUserBoardMember(boardId, userId);
-        if (!isMember) {
-          socket.emit("error", "Not authorized to access this board");
-          return;
+  // Cleanup inactive connections
+  const cleanupInterval = setInterval(() => {
+    const now = Date.now();
+    rooms.forEach((clients, roomId) => {
+      clients.forEach((client) => {
+        if (now - client.lastPing > 30000) {
+          // 30 seconds timeout
+          client.ws.close();
+          clients.delete(client);
         }
-
-        // Join the room
-        socket.join(`board:${boardId}`);
-        socket.emit("board-joined", boardId);
-
-        // Notify other members about the new user
-        socket.to(`board:${boardId}`).emit("user-joined", {
-          userId: socket.data.user.id,
-          username: socket.data.user.username,
-        });
-
-        // Track user's cursor position
-        socket.on("cursor-move", (data) => {
-          socket.to(`board:${boardId}`).emit("cursor-update", {
-            userId: socket.data.user.id,
-            username: socket.data.user.username,
-            x: data.x,
-            y: data.y,
-          });
-        });
-      } catch (error) {
-        console.error("Error joining board:", error);
-        socket.emit("error", "Failed to join board");
-      }
-    });
-
-    // Handle leaving a board
-    socket.on("leave-board", (boardId) => {
-      socket.leave(`board:${boardId}`);
-      socket.to(`board:${boardId}`).emit("user-left", {
-        userId: socket.data.user.id,
-        username: socket.data.user.username,
       });
-    });
-
-    // Handle disconnection
-    socket.on("disconnect", () => {
-      console.log("User disconnected:", socket.data.user.id);
-    });
-  });
-
-  // Setup Y-websocket integration
-  const wsServer = new WebSocketServer({
-    server,
-    path: "/yjs-ws/",
-  });
-
-  // Authenticate WebSocket connections for Yjs
-  wsServer.on("connection", async (conn: WebSocket, req: Request) => {
-    try {
-      // Extract room ID from URL (e.g., /yjs-ws/board:123)
-      const url = new URL(req.url || "", "http://localhost");
-      const roomId = url.pathname.split("/").pop();
-
-      if (!roomId || !roomId.startsWith("board:")) {
-        conn.close();
-        return;
+      if (clients.size === 0) {
+        rooms.delete(roomId);
       }
+    });
+  }, 10000);
 
-      const boardId = roomId.replace("board:", "");
+  // Handle WebSocket connections - MODIFIED CONNECTION HANDLER
+  wsServer.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
+    console.log("New WebSocket connection received:", req.url);
 
-      // Extract token from query params
+    try {
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const pathSegments = url.pathname.split("/").filter(Boolean);
+      const roomInfo = pathSegments[pathSegments.length - 1];
       const token = url.searchParams.get("token");
-      if (!token) {
-        conn.close();
+
+      console.log("Connection details:", {
+        url: url.toString(),
+        pathSegments,
+        roomInfo,
+        hasToken: !!token,
+      });
+
+      if (!roomInfo?.startsWith("board:") || !token) {
+        console.log("Invalid connection parameters - Missing room or token");
+        ws.close(1008, "Invalid connection parameters");
         return;
       }
 
       const decoded = verifyToken(token);
       if (!decoded) {
-        conn.close();
+        console.log("Authentication failed - Invalid token");
+        ws.close(1008, "Authentication failed");
         return;
       }
 
-      // Check if user is a member of this board
+      const boardId = roomInfo.replace("board:", "");
       const isMember = await boardService.isUserBoardMember(
         boardId,
         decoded.id
       );
+
       if (!isMember) {
-        conn.close();
+        console.log("Not authorized");
+        ws.close(1008, "Not authorized");
         return;
       }
 
-      // Allow connection
-      conn.addEventListener("message", (message) => {
-        // Handle Yjs messages
-        console.log(message);
+      // Add successful connection logging
+      console.log(`Client connected successfully to room ${roomInfo}`);
+
+      // Initialize room if doesn't exist
+      if (!rooms.has(roomInfo)) {
+        rooms.set(roomInfo, new Set());
+      }
+
+      const roomClient: RoomClient = {
+        ws,
+        userId: decoded.id,
+        lastPing: Date.now(),
+      };
+
+      rooms.get(roomInfo)!.add(roomClient);
+
+      // Setup ping/pong
+      ws.on("pong", () => {
+        roomClient.lastPing = Date.now();
       });
+
+      // Handle messages
+      ws.on("message", (message: Buffer) => {
+        try {
+          const roomClients = rooms.get(roomInfo);
+          if (!roomClients) return;
+
+          roomClients.forEach((client) => {
+            if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
+              client.ws.send(message);
+            }
+          });
+        } catch (error) {
+          console.error("Broadcasting error:", error);
+        }
+      });
+
+      // Cleanup on close
+      ws.on("close", () => {
+        const roomClients = rooms.get(roomInfo);
+        if (roomClients) {
+          roomClients.delete(roomClient);
+          if (roomClients.size === 0) {
+            rooms.delete(roomInfo);
+          }
+        }
+      });
+
+      // Start ping interval
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.ping();
+        } else {
+          clearInterval(pingInterval);
+        }
+      }, 15000);
+
+      // Add connected client logging
+      console.log(
+        `Total clients in room ${roomInfo}: ${rooms.get(roomInfo)!.size}`
+      );
+
+      ws.send(JSON.stringify({ type: "connection-ack", userId: decoded.id }));
     } catch (error) {
-      console.error("WebSocket error:", error);
-      conn.close();
+      console.error("Connection error:", error);
+      ws.close(1011, "Internal server error");
     }
+  });
+
+  // Cleanup on server shutdown
+  server.on("close", () => {
+    clearInterval(cleanupInterval);
+    rooms.forEach((clients) => {
+      clients.forEach((client) => client.ws.close());
+    });
+    rooms.clear();
   });
 
   return io;

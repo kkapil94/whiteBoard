@@ -52,42 +52,134 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   // Initialize Y.js and WebSocket connection
   const ydoc = useMemo(() => new Y.Doc(), []);
   const [isConnected, setIsConnected] = useState(false);
+  const [authFailed, setAuthFailed] = useState(false);
 
-  const provider = useMemo(
-    () =>
-      new WebsocketProvider(
-        import.meta.env.VITE_WS_URL || "ws://localhost:1234",
-        "whiteboard-room",
+  const provider = useMemo(() => {
+    if (authFailed) {
+      return null; // Don't create provider if auth already failed
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("No auth token found");
+        throw new Error("Authentication required");
+      }
+
+      const wsUrl = new URL(
+        import.meta.env.VITE_WS_URL || "ws://localhost:4000"
+      );
+      const boardId = "whiteboard-room";
+      wsUrl.pathname = `/yjs-ws/board:${boardId}`;
+      wsUrl.searchParams.append("token", token);
+
+      console.log("Connecting to WebSocket URL:", wsUrl.toString());
+
+      // Create the provider with all auto-reconnection disabled
+      const wsProvider = new WebsocketProvider(
+        wsUrl.toString(),
+        boardId,
         ydoc,
-        { connect: true }
-      ),
-    [ydoc]
-  );
+        {
+          connect: false,
+          WebSocketPolyfill: WebSocket,
+          resyncInterval: 0, // Disable automatic resyncing
+          maxBackoffTime: 0, // Disable backoff
+          disableBc: true, // Disable broadcast channel
+        }
+      );
 
-  const yArray = useMemo(() => ydoc.getArray("fabric-objects"), [ydoc]);
+      // Set up listeners
+      wsProvider.on("connection-close", (event: any) => {
+        console.log("WebSocket connection closed:", event);
 
-  // Handle WebSocket connection status
+        // Permanently disable reconnection on auth failure
+        if (event?.code === 1008) {
+          console.log("Authentication failed (connection-close)");
+          setAuthFailed(true);
+          wsProvider.disconnect();
+          // Force cleanup any internal provider reconnection attempts
+          wsProvider.shouldConnect = false;
+        }
+      });
+
+      wsProvider.on("connection-error", (error: any) => {
+        console.error("WebSocket Connection Error:", error);
+
+        // Permanently disable reconnection on auth failure
+        if (error?.code === 1008) {
+          console.log("Authentication failed (connection-error)");
+          setAuthFailed(true);
+          wsProvider.disconnect();
+          // Force cleanup any internal provider reconnection attempts
+          wsProvider.shouldConnect = false;
+        }
+      });
+
+      wsProvider.on("status", ({ status }: { status: string }) => {
+        console.log("WebSocket Connection Status:", status);
+        if (!authFailed) {
+          setIsConnected(status === "connected");
+        }
+      });
+
+      // Initial connect attempt only if we haven't detected auth failure
+      wsProvider.connect();
+
+      return wsProvider;
+    } catch (error) {
+      console.error("Failed to create WebSocket provider:", error);
+      return null;
+    }
+  }, [ydoc, authFailed]); // Add authFailed as a dependency
+
+  // Replace retry logic with a simplified version that respects auth failure
   useEffect(() => {
-    const handleStatus = ({ status }: { status: string }) => {
-      console.log(`WebSocket is ${status}`);
-      setIsConnected(status === "connected");
+    if (!provider || authFailed) return; // Skip if provider is null or auth failed
+
+    let reconnectTimeout: NodeJS.Timeout;
+
+    const handleConnectionError = (error: any) => {
+      console.error("WebSocket connection error in effect:", error);
+
+      if (error?.code === 1008) {
+        // Auth failed, permanently disable reconnection
+        console.log("Authentication failure detected, disabling reconnection");
+        setAuthFailed(true);
+        clearTimeout(reconnectTimeout);
+        return;
+      }
+
+      // Only set up reconnection for non-auth errors and if auth hasn't failed
+      if (!authFailed && error?.code !== 1008) {
+        reconnectTimeout = setTimeout(() => {
+          console.log("Attempting to reconnect...");
+          if (provider && !provider.wsconnected && !authFailed) {
+            provider.connect();
+          }
+        }, 5000);
+      }
     };
 
-    provider.on("status", handleStatus);
-
-    // Try reconnecting if connection fails
-    const reconnectInterval = setInterval(() => {
-      if (!isConnected) {
-        provider.connect();
-      }
-    }, 5000);
+    provider.on("connection-error", handleConnectionError);
 
     return () => {
-      provider.off("status", handleStatus);
-      clearInterval(reconnectInterval);
-      provider.destroy();
+      provider.off("connection-error", handleConnectionError);
+      clearTimeout(reconnectTimeout);
     };
-  }, [provider, isConnected]);
+  }, [provider, authFailed]); // Add authFailed as a dependency
+
+  // Add a UI warning when authentication fails
+  useEffect(() => {
+    if (authFailed) {
+      console.error(
+        "Authentication failed for whiteboard. Please log in again."
+      );
+      // Optionally show a notification to the user
+    }
+  }, [authFailed]);
+
+  const yArray = useMemo(() => ydoc.getArray("fabric-objects"), [ydoc]);
 
   // Update canvas when receiving changes
   useEffect(() => {
@@ -171,7 +263,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
   // Memoized sync function
   const syncCanvasToYjs = useCallback(() => {
-    if (!fabricCanvasRef.current || !isConnected) return;
+    if (!fabricCanvasRef.current || !isConnected || authFailed) return;
 
     try {
       const canvasJson = fabricCanvasRef.current.toJSON();
@@ -180,7 +272,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     } catch (error) {
       console.error("Error syncing to Yjs:", error);
     }
-  }, [yArray, isConnected]);
+  }, [yArray, isConnected, authFailed]);
 
   // Optimize canvas initialization
   const initializeCanvas = useCallback(() => {
