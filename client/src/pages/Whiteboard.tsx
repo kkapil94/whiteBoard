@@ -367,6 +367,12 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       canvas.requestRenderAll();
     });
 
+    // Add event listener for path creation (free drawing)
+    canvas.on("path:created", () => {
+      console.log("Path created - syncing canvas");
+      syncCanvasToYjs();
+    });
+
     // Setup other event listeners
     const historyCleanup = setupHistoryManagement(canvas);
     const toolEventCleanup = setupToolEventListeners(canvas);
@@ -377,7 +383,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       canvas.dispose();
       fabricCanvasRef.current = null;
     };
-  }, [width, height]);
+  }, [width, height, syncCanvasToYjs]);
 
   useEffect(() => {
     const cleanup = initializeCanvas();

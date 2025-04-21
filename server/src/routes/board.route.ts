@@ -8,6 +8,7 @@ import {
   getUserBoards,
   removeMemberFromBoard,
   updateBoardName,
+  updateBoardContent,
 } from "../controllers/board.controller";
 import { verifyToken } from "../middlewares/verifyToken";
 
@@ -21,6 +22,7 @@ router.post("/", createBoard);
 router.get("/", getUserBoards);
 router.get("/:boardId", getBoardById);
 router.put("/:boardId", updateBoardName);
+router.patch("/:boardId", updateBoardContent);
 router.delete("/:boardId", deleteBoard);
 
 // Board member management routes
