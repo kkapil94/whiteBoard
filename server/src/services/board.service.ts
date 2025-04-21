@@ -157,6 +157,26 @@ export const boardService = {
     });
   },
 
+  // Update board content
+  async updateBoardContent(boardId: string, userId: string, content: string) {
+    // Check if user is a member of the board
+    const board = await prisma.board.findFirst({
+      where: {
+        id: boardId,
+        OR: [{ ownerId: userId }, { members: { some: { id: userId } } }],
+      },
+    });
+
+    if (!board) {
+      throw new Error("Not authorized to update this board");
+    }
+
+    return prisma.board.update({
+      where: { id: boardId },
+      data: { content },
+    });
+  },
+
   // Delete a board
   async deleteBoard(boardId: string, userId: string) {
     // Check if user is board owner

@@ -10,6 +10,7 @@ import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { v4 as uuidv4 } from "uuid";
 import { debounce } from "lodash";
+import { useParams } from "react-router-dom";
 
 import {
   FaMousePointer,
@@ -45,7 +46,7 @@ type Tool =
   | "eraser";
 
 const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
-  // Canvas and fabric references
+  const { boardId } = useParams<{ boardId: string }>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
 
@@ -55,8 +56,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   const [authFailed, setAuthFailed] = useState(false);
 
   const provider = useMemo(() => {
-    if (authFailed) {
-      return null; // Don't create provider if auth already failed
+    if (authFailed || !boardId) {
+      return null;
     }
 
     try {
@@ -69,13 +70,11 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       const wsUrl = new URL(
         import.meta.env.VITE_WS_URL || "ws://localhost:4000"
       );
-      const boardId = "whiteboard-room";
       wsUrl.pathname = `/yjs-ws/board:${boardId}`;
       wsUrl.searchParams.append("token", token);
 
       console.log("Connecting to WebSocket URL:", wsUrl.toString());
 
-      // Create the provider with all auto-reconnection disabled
       const wsProvider = new WebsocketProvider(
         wsUrl.toString(),
         boardId,
@@ -83,9 +82,9 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
         {
           connect: false,
           WebSocketPolyfill: WebSocket,
-          resyncInterval: 0, // Disable automatic resyncing
-          maxBackoffTime: 0, // Disable backoff
-          disableBc: true, // Disable broadcast channel
+          resyncInterval: 0,
+          maxBackoffTime: 0,
+          disableBc: true,
         }
       );
 
@@ -131,7 +130,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       console.error("Failed to create WebSocket provider:", error);
       return null;
     }
-  }, [ydoc, authFailed]); // Add authFailed as a dependency
+  }, [ydoc, authFailed, boardId]); // Add authFailed and boardId as dependencies
 
   // Replace retry logic with a simplified version that respects auth failure
   useEffect(() => {
