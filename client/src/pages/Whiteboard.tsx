@@ -11,6 +11,10 @@ import { WebsocketProvider } from "y-websocket";
 import { v4 as uuidv4 } from "uuid";
 import { debounce } from "lodash";
 import { useParams } from "react-router-dom";
+import {
+  useGetBoardByIdQuery,
+  useUpdateBoardContentMutation,
+} from "@/store/api/boardApi";
 
 import {
   FaMousePointer,
@@ -180,6 +184,51 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
   const yArray = useMemo(() => ydoc.getArray("fabric-objects"), [ydoc]);
 
+  // Fetch board data using Redux hook
+  const { data: boardData, isLoading } = useGetBoardByIdQuery(boardId || "", {
+    skip: !boardId,
+  });
+
+  // Hook for updating board content
+  const [updateBoardContent] = useUpdateBoardContentMutation();
+
+  // Update board content in database when canvas changes
+  const saveCanvasToDatabase = useCallback(
+    debounce((content: string) => {
+      if (!boardId) return;
+
+      try {
+        console.log("Saving canvas to database");
+        updateBoardContent({
+          boardId,
+          content,
+        });
+      } catch (error) {
+        console.error("Error saving canvas to database:", error);
+      }
+    }, 2000),
+    [boardId, updateBoardContent]
+  );
+
+  // Modified sync function to also save to database
+  const syncCanvasToYjs = useCallback(() => {
+    if (!fabricCanvasRef.current || !isConnected || authFailed) return;
+
+    try {
+      const canvasJson = fabricCanvasRef.current.toJSON();
+      const canvasJsonString = JSON.stringify(canvasJson);
+
+      // Update Yjs document
+      yArray.delete(0, yArray.length);
+      yArray.push([canvasJson]);
+
+      // Save to database
+      saveCanvasToDatabase(canvasJsonString);
+    } catch (error) {
+      console.error("Error syncing canvas:", error);
+    }
+  }, [yArray, isConnected, authFailed, saveCanvasToDatabase]);
+
   // Update canvas when receiving changes
   useEffect(() => {
     const updateCanvasFromYjs = () => {
@@ -207,6 +256,31 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     yArray.observe(updateCanvasFromYjs);
     return () => yArray.unobserve(updateCanvasFromYjs);
   }, [yArray]);
+
+  // Fetch board content when component mounts
+  useEffect(() => {
+    if (!boardId || !boardData || isLoading) return;
+
+    console.log("Board data received:", boardData);
+
+    // If board has saved content and canvas is initialized, load it
+    if (boardData.content && fabricCanvasRef.current) {
+      console.log("Loading content into canvas");
+      fabricCanvasRef.current.loadFromJSON(boardData.content, () => {
+        fabricCanvasRef.current?.requestRenderAll();
+
+        // Make objects selectable after loading
+        if (fabricCanvasRef.current) {
+          fabricCanvasRef.current.getObjects().forEach((obj) => {
+            obj.selectable = true;
+            obj.evented = true;
+          });
+        }
+
+        console.log("Board content loaded successfully");
+      });
+    }
+  }, [boardId, boardData, isLoading]);
 
   // State for toolbar controls
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -259,19 +333,6 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       }, 300),
     []
   );
-
-  // Memoized sync function
-  const syncCanvasToYjs = useCallback(() => {
-    if (!fabricCanvasRef.current || !isConnected || authFailed) return;
-
-    try {
-      const canvasJson = fabricCanvasRef.current.toJSON();
-      yArray.delete(0, yArray.length);
-      yArray.push([canvasJson]);
-    } catch (error) {
-      console.error("Error syncing to Yjs:", error);
-    }
-  }, [yArray, isConnected, authFailed]);
 
   // Optimize canvas initialization
   const initializeCanvas = useCallback(() => {

@@ -136,3 +136,31 @@ export const deleteBoard = asyncHandler(
     return res.json({ message: "Board deleted successfully" });
   }
 );
+
+// Update board content
+export const updateBoardContent = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { boardId } = req.params;
+    const { content } = req.body;
+    const userId = req.user.id;
+
+    if (!content) {
+      return res.status(400).json({ message: "Board content is required" });
+    }
+
+    try {
+      const updatedBoard = await boardService.updateBoardContent(
+        boardId,
+        userId,
+        content
+      );
+      return res.json(updatedBoard);
+    } catch (error: any) {
+      console.error("Update board content error:", error);
+      if (error.message === "Not authorized to update this board") {
+        return res.status(403).json({ message: error.message });
+      }
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  }
+);

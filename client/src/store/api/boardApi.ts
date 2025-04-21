@@ -6,6 +6,7 @@ export interface Board {
   name: string;
   createdAt: string;
   updatedAt: string;
+  content?: string;
   owner: {
     id: string;
     name: string | null;
@@ -60,6 +61,23 @@ export const boardApi = createApi({
       }),
       invalidatesTags: ["Board"],
     }),
+    getBoardById: builder.query<Board, string>({
+      query: (id) => `/boards/${id}`,
+      providesTags: (result, error, id) => [{ type: "Board", id }],
+    }),
+    updateBoardContent: builder.mutation<
+      Board,
+      { boardId: string; content: string }
+    >({
+      query: ({ boardId, content }) => ({
+        url: `/boards/${boardId}`,
+        method: "PATCH",
+        body: { content },
+      }),
+      invalidatesTags: (result, error, arg) => [
+        { type: "Board", id: arg.boardId },
+      ],
+    }),
   }),
 });
 
@@ -67,4 +85,6 @@ export const {
   useGetBoardsQuery,
   useCreateBoardMutation,
   useDeleteBoardMutation,
+  useGetBoardByIdQuery,
+  useUpdateBoardContentMutation,
 } = boardApi;
