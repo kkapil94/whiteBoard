@@ -19,9 +19,9 @@ const BoardLayout: React.FC = () => {
       <header className="bg-white border-b p-4 shadow-sm">
         <div className="container mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <FaChalkboard className="text-primary text-xl" />
+            <FaChalkboard className="text-blue-500 text-xl" />
             <h1
-              className="text-xl font-bold cursor-pointer"
+              className="text-xl font-bold cursor-pointer text-blue-500"
               onClick={() => navigate("/dashboard")}
             >
               Whiteboard App
@@ -37,7 +37,7 @@ const BoardLayout: React.FC = () => {
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+              className="flex items-center gap-2 text-gray-600 hover:text-blue-500 transition-colors"
               title="Logout"
             >
               <FaSignOutAlt />

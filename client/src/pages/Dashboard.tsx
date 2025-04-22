@@ -86,7 +86,7 @@ const Dashboard: React.FC = () => {
         <h1 className="text-3xl font-bold">My Whiteboards</h1>
         <Button
           onClick={() => setShowNewBoardInput((prev) => !prev)}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600"
         >
           <FaPlus />
           <span>New Whiteboard</span>
@@ -106,7 +106,12 @@ const Dashboard: React.FC = () => {
                 if (e.key === "Enter") handleCreateBoard();
               }}
             />
-            <Button onClick={handleCreateBoard}>Create</Button>
+            <Button
+              onClick={handleCreateBoard}
+              className="bg-blue-500 hover:bg-blue-600"
+            >
+              Create
+            </Button>
             <Button
               variant="outline"
               onClick={() => setShowNewBoardInput(false)}
