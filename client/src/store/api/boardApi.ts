@@ -78,6 +78,18 @@ export const boardApi = createApi({
         { type: "Board", id: arg.boardId },
       ],
     }),
+    addBoardMember: builder.mutation<Board, { boardId: string; email: string }>(
+      {
+        query: ({ boardId, email }) => ({
+          url: `/boards/${boardId}/members`,
+          method: "POST",
+          body: { memberIdentifier: email },
+        }),
+        invalidatesTags: (result, error, arg) => [
+          { type: "Board", id: arg.boardId },
+        ],
+      }
+    ),
   }),
 });
 
@@ -87,4 +99,5 @@ export const {
   useDeleteBoardMutation,
   useGetBoardByIdQuery,
   useUpdateBoardContentMutation,
+  useAddBoardMemberMutation,
 } = boardApi;

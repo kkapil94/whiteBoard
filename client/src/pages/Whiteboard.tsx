@@ -15,7 +15,8 @@ import {
   useGetBoardByIdQuery,
   useUpdateBoardContentMutation,
 } from "@/store/api/boardApi";
-
+import { Button } from "@/components/ui/button";
+import { InviteDialog } from "@/components/ui/invite-dialog";
 import {
   FaMousePointer,
   FaSquare,
@@ -34,12 +35,32 @@ import {
   FaClone,
   FaExclamationTriangle,
   FaSignOutAlt,
+  FaUsers,
 } from "react-icons/fa";
 import "./Whiteboard.css";
 
 interface WhiteboardProps {
   width: number;
   height: number;
+}
+
+interface CursorPosition {
+  x: number;
+  y: number;
+  boardX: number;
+  boardY: number;
+  transform?: {
+    x: number;
+    y: number;
+    scale: number;
+  };
+}
+
+interface RemoteUser {
+  userId: string;
+  username: string;
+  cursor: CursorPosition | null;
+  color: string;
 }
 
 type Tool =
@@ -63,6 +84,8 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
   const ydoc = useMemo(() => new Y.Doc(), []);
   const [isConnected, setIsConnected] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [remoteUsers, setRemoteUsers] = useState<RemoteUser[]>([]);
 
   // Connection status management
   const provider = useMemo(() => {
@@ -208,6 +231,176 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     }
   }, [authFailed, navigate]);
 
+  // Add cursor tracking effect
+  useEffect(() => {
+    if (!provider || !canvasContainerRef.current) return;
+
+    const handleCursorMove = (e: MouseEvent) => {
+      if (!canvasContainerRef.current) return;
+
+      const rect = canvasContainerRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const cursorData = {
+        x,
+        y,
+        boardX: x,
+        boardY: y,
+        transform: fabricCanvasRef.current?.viewportTransform
+          ? {
+              x: fabricCanvasRef.current.viewportTransform[4],
+              y: fabricCanvasRef.current.viewportTransform[5],
+              scale: fabricCanvasRef.current.viewportTransform[0],
+            }
+          : undefined,
+      };
+
+      // Update Y.js awareness with cursor position
+      provider.awareness.setLocalStateField("cursor", cursorData);
+
+      // Also send direct cursor position message for immediate update
+      if (provider.wsconnected) {
+        provider.ws?.send(
+          JSON.stringify({
+            type: "cursor-position",
+            cursor: cursorData,
+          })
+        );
+      }
+    };
+
+    const handleCursorLeave = () => {
+      provider.awareness.setLocalStateField("cursor", null);
+
+      // Send null cursor position when leaving
+      if (provider.wsconnected) {
+        provider.ws?.send(
+          JSON.stringify({
+            type: "cursor-position",
+            cursor: null,
+          })
+        );
+      }
+    };
+
+    // Initialize user state
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    provider.awareness.setLocalStateField("user", {
+      id: user.id,
+      name: user.name || user.username,
+      color: `#${Math.floor(Math.random() * 16777215).toString(16)}`, // Random color
+    });
+
+    // Handle remote users' presence
+    const handleAwareness = () => {
+      const users: RemoteUser[] = [];
+      provider.awareness.getStates().forEach((state: any, clientId: number) => {
+        if (
+          clientId !== provider.awareness.clientID &&
+          state.user &&
+          state.cursor
+        ) {
+          users.push({
+            userId: state.user.id,
+            username: state.user.name,
+            cursor: state.cursor,
+            color: state.user.color,
+          });
+        }
+      });
+      setRemoteUsers(users);
+    };
+
+    // Handle direct WebSocket messages for cursor updates
+    const handleWebSocketMessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "cursor-update") {
+          // Update remote users state with cursor position
+          setRemoteUsers((prev) => {
+            const otherUsers = prev.filter((u) => u.userId !== data.userId);
+            if (data.cursor) {
+              return [
+                ...otherUsers,
+                {
+                  userId: data.userId,
+                  username: data.username,
+                  cursor: data.cursor,
+                  color: data.color,
+                },
+              ];
+            }
+            return otherUsers;
+          });
+        } else if (
+          data.type === "user-joined" ||
+          data.type === "active-users"
+        ) {
+          // Handle users joining or active users updates
+          console.log("User presence update:", data);
+          if (data.type === "active-users" && Array.isArray(data.users)) {
+            setRemoteUsers(
+              data.users.filter((u: RemoteUser) => u.userId !== user.id)
+            );
+          } else if (data.type === "user-joined") {
+            setRemoteUsers((prev) => {
+              const otherUsers = prev.filter((u) => u.userId !== data.userId);
+              return [
+                ...otherUsers,
+                {
+                  userId: data.userId,
+                  username: data.username,
+                  cursor: null,
+                  color: data.color,
+                },
+              ];
+            });
+          }
+        } else if (data.type === "user-left") {
+          // Remove user who left
+          setRemoteUsers((prev) =>
+            prev.filter((u) => u.userId !== data.userId)
+          );
+        }
+      } catch (error) {
+        console.error("Error processing WebSocket message:", error);
+      }
+    };
+
+    // Set up event listeners
+    canvasContainerRef.current.addEventListener("mousemove", handleCursorMove);
+    canvasContainerRef.current.addEventListener(
+      "mouseleave",
+      handleCursorLeave
+    );
+    provider.awareness.on("change", handleAwareness);
+
+    // Add direct WebSocket message listener
+    if (provider.ws) {
+      provider.ws.addEventListener("message", handleWebSocketMessage);
+    }
+
+    return () => {
+      if (canvasContainerRef.current) {
+        canvasContainerRef.current.removeEventListener(
+          "mousemove",
+          handleCursorMove
+        );
+        canvasContainerRef.current.removeEventListener(
+          "mouseleave",
+          handleCursorLeave
+        );
+      }
+      provider?.awareness.off("change", handleAwareness);
+
+      // Remove WebSocket message listener
+      if (provider.ws) {
+        provider.ws.removeEventListener("message", handleWebSocketMessage);
+      }
+    };
+  }, [provider]);
+
   // Set up Y.js shared data
   const yArray = useMemo(() => ydoc.getArray("fabric-objects"), [ydoc]);
 
@@ -243,9 +436,10 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
     [boardId, updateBoardContent]
   );
 
-  // Modified sync function to also save to database
+  // Modified sync function to also save to database and notify other clients
   const syncCanvasToYjs = useCallback(() => {
-    if (!fabricCanvasRef.current || !isConnected || authFailed) return;
+    if (!fabricCanvasRef.current || !provider || !isConnected || authFailed)
+      return;
 
     try {
       const canvasJson = fabricCanvasRef.current.toJSON();
@@ -258,12 +452,22 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       yArray.delete(0, yArray.length);
       yArray.push([canvasJson]);
 
+      // Send explicit board update message via WebSocket for immediate sync
+      if (provider.wsconnected && provider.ws) {
+        provider.ws.send(
+          JSON.stringify({
+            type: "board-update",
+            content: canvasJsonString,
+          })
+        );
+      }
+
       // Save to database
       saveCanvasToDatabase(canvasJsonString);
     } catch (error) {
       console.error("Error syncing canvas:", error);
     }
-  }, [yArray, isConnected, authFailed, saveCanvasToDatabase]);
+  }, [yArray, isConnected, authFailed, saveCanvasToDatabase, provider]);
 
   // Update canvas when receiving changes
   useEffect(() => {
@@ -1403,6 +1607,16 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
 
             <div className="separator"></div>
 
+            <button
+              onClick={() => setShowInviteDialog(true)}
+              title="Invite Collaborators"
+              className="tool-button"
+            >
+              <FaUsers />
+            </button>
+
+            <div className="separator"></div>
+
             {authFailed && (
               <div
                 className="connection-status connection-error"
@@ -1434,6 +1648,51 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ width, height }) => {
       <div className="canvas-wrapper" ref={canvasContainerRef}>
         <canvas ref={canvasRef} />
       </div>
+
+      <div className="remote-cursors">
+        {remoteUsers.map((user) => (
+          <div
+            key={user.userId}
+            className="remote-cursor"
+            style={{
+              position: "absolute",
+              left: user.cursor?.x,
+              top: user.cursor?.y,
+              transform: "translate(-50%, -50%)",
+              pointerEvents: "none",
+              zIndex: 1000,
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M5.65376 12.3673H5.46026L5.31717 12.4796L0.500002 16.0001L2.68571 17.3813L3.52414 18L3.68754 17.8882L7.85726 14.8319V14.6384L5.65376 12.3673Z"
+                fill={user.color}
+                stroke="white"
+                strokeWidth="1"
+              />
+            </svg>
+            <div
+              style={{
+                background: user.color,
+                color: "white",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                fontSize: "12px",
+                marginTop: "4px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {user.username}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <InviteDialog
+        isOpen={showInviteDialog}
+        onClose={() => setShowInviteDialog(false)}
+        boardId={boardId || ""}
+      />
     </div>
   );
 };

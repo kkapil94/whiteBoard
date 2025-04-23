@@ -5,16 +5,32 @@ import http, { IncomingMessage } from "http";
 import { boardService } from "../services/board.service";
 import jwt from "jsonwebtoken";
 import { WebSocket, WebSocketServer } from "ws";
+import prisma from "../db";
 
 interface DecodedUser {
   id: string;
   username?: string;
 }
 
+interface CursorPosition {
+  x: number;
+  y: number;
+  boardX: number;
+  boardY: number;
+  transform?: {
+    x: number;
+    y: number;
+    scale: number;
+  };
+}
+
 interface RoomClient {
   ws: WebSocket;
   userId: string;
   lastPing: number;
+  username?: string;
+  cursor?: CursorPosition;
+  color?: string;
 }
 
 // Redis setup with error handling
@@ -47,6 +63,47 @@ const verifyToken = (token: string): DecodedUser | null => {
   } catch (err) {
     console.error("Token verification failed:", err);
     return null;
+  }
+};
+
+// Random color generator for user cursors
+const generateRandomColor = () => {
+  const colors = [
+    "#2563eb", // blue
+    "#059669", // emerald
+    "#d97706", // amber
+    "#dc2626", // red
+    "#7c3aed", // violet
+    "#db2777", // pink
+    "#0891b2", // cyan
+    "#65a30d", // lime
+  ];
+  return colors[Math.floor(Math.random() * colors.length)];
+};
+
+// Send all active users in a room to a specific client
+const sendActiveUsers = (
+  roomInfo: string,
+  rooms: Map<string, Set<RoomClient>>,
+  targetClient: RoomClient
+) => {
+  const roomClients = rooms.get(roomInfo);
+  if (!roomClients) return;
+
+  const users = Array.from(roomClients).map((client) => ({
+    userId: client.userId,
+    username: client.username,
+    cursor: client.cursor || null,
+    color: client.color,
+  }));
+
+  if (targetClient.ws.readyState === WebSocket.OPEN) {
+    targetClient.ws.send(
+      JSON.stringify({
+        type: "active-users",
+        users,
+      })
+    );
   }
 };
 
@@ -155,6 +212,12 @@ export function setupSocketServer(server: http.Server) {
         return;
       }
 
+      // Get user details for collaboration
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.id },
+        select: { id: true, username: true, name: true },
+      });
+
       // Add successful connection logging
       console.log(`Client connected successfully to room ${roomInfo}`);
 
@@ -167,9 +230,32 @@ export function setupSocketServer(server: http.Server) {
         ws,
         userId: decoded.id,
         lastPing: Date.now(),
+        username: user?.name || user?.username || "Anonymous",
+        color: generateRandomColor(),
       };
 
       rooms.get(roomInfo)!.add(roomClient);
+
+      // Broadcast new user joined to existing users in the room
+      const roomClients = rooms.get(roomInfo)!;
+      roomClients.forEach((client) => {
+        if (
+          client.userId !== decoded.id &&
+          client.ws.readyState === WebSocket.OPEN
+        ) {
+          client.ws.send(
+            JSON.stringify({
+              type: "user-joined",
+              userId: decoded.id,
+              username: roomClient.username,
+              color: roomClient.color,
+            })
+          );
+        }
+      });
+
+      // Send current users to the new connection
+      sendActiveUsers(roomInfo, rooms, roomClient);
 
       // Setup ping/pong
       ws.on("pong", () => {
@@ -182,12 +268,75 @@ export function setupSocketServer(server: http.Server) {
           const roomClients = rooms.get(roomInfo);
           if (!roomClients) return;
 
-          roomClients.forEach((client) => {
-            if (client.ws !== ws && client.ws.readyState === WebSocket.OPEN) {
-              client.ws.send(message);
+          // First byte is message type in Y.js protocol
+          const firstByte = message[0];
+          // Y.js sync message types are numbers, JSON messages are strings starting with { or [
+          const isJson = message
+            .toString()
+            .trim()
+            .match(/^[\{\[]/);
+
+          if (isJson) {
+            // Handle JSON messages (cursor updates, etc)
+            const msgData = JSON.parse(message.toString());
+            roomClient.lastPing = Date.now();
+
+            if (msgData.type === "cursor-position") {
+              roomClient.cursor = msgData.cursor;
+              // Broadcast cursor position to other clients
+              roomClients.forEach((client) => {
+                if (
+                  client.userId !== decoded.id &&
+                  client.ws.readyState === WebSocket.OPEN
+                ) {
+                  client.ws.send(
+                    JSON.stringify({
+                      type: "cursor-update",
+                      userId: decoded.id,
+                      cursor: msgData.cursor,
+                      username: roomClient.username,
+                      color: roomClient.color,
+                    })
+                  );
+                }
+              });
+            } else if (msgData.type === "board-update") {
+              // Broadcast board updates to other clients
+              roomClients.forEach((client) => {
+                if (
+                  client.userId !== decoded.id &&
+                  client.ws.readyState === WebSocket.OPEN
+                ) {
+                  client.ws.send(message);
+                }
+              });
+            } else if (msgData.type === "invitation-response") {
+              // Handle invitation responses
+              roomClients.forEach((client) => {
+                if (
+                  client.userId === msgData.inviterId &&
+                  client.ws.readyState === WebSocket.OPEN
+                ) {
+                  client.ws.send(message);
+                }
+              });
             }
-          });
+          } else {
+            // Handle binary Y.js protocol messages
+            roomClient.lastPing = Date.now();
+
+            // Forward Y.js messages to all other clients
+            roomClients.forEach((client) => {
+              if (
+                client.userId !== decoded.id &&
+                client.ws.readyState === WebSocket.OPEN
+              ) {
+                client.ws.send(message);
+              }
+            });
+          }
         } catch (error) {
+          // Log error but don't throw - we want to keep the connection alive
           console.error("Broadcasting error:", error);
         }
       });
@@ -196,6 +345,21 @@ export function setupSocketServer(server: http.Server) {
       ws.on("close", () => {
         const roomClients = rooms.get(roomInfo);
         if (roomClients) {
+          // Broadcast user left message
+          roomClients.forEach((client) => {
+            if (
+              client.userId !== decoded.id &&
+              client.ws.readyState === WebSocket.OPEN
+            ) {
+              client.ws.send(
+                JSON.stringify({
+                  type: "user-left",
+                  userId: decoded.id,
+                })
+              );
+            }
+          });
+
           roomClients.delete(roomClient);
           if (roomClients.size === 0) {
             rooms.delete(roomInfo);
@@ -217,7 +381,14 @@ export function setupSocketServer(server: http.Server) {
         `Total clients in room ${roomInfo}: ${rooms.get(roomInfo)!.size}`
       );
 
-      ws.send(JSON.stringify({ type: "connection-ack", userId: decoded.id }));
+      ws.send(
+        JSON.stringify({
+          type: "connection-ack",
+          userId: decoded.id,
+          color: roomClient.color,
+          username: roomClient.username,
+        })
+      );
     } catch (error) {
       console.error("Connection error:", error);
       ws.close(1011, "Internal server error");
