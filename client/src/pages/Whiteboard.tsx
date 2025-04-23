@@ -15,7 +15,6 @@ import {
   useGetBoardByIdQuery,
   useUpdateBoardContentMutation,
 } from "@/store/api/boardApi";
-import { Button } from "@/components/ui/button";
 import { InviteDialog } from "@/components/ui/invite-dialog";
 import {
   FaMousePointer,

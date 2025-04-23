@@ -76,7 +76,6 @@ const generateRandomColor = () => {
     "#7c3aed", // violet
     "#db2777", // pink
     "#0891b2", // cyan
-    "#65a30d", // lime
   ];
   return colors[Math.floor(Math.random() * colors.length)];
 };
@@ -172,20 +171,11 @@ export function setupSocketServer(server: http.Server) {
 
   // Handle WebSocket connections - MODIFIED CONNECTION HANDLER
   wsServer.on("connection", async (ws: WebSocket, req: IncomingMessage) => {
-    console.log("New WebSocket connection received:", req.url);
-
     try {
       const url = new URL(req.url!, `http://${req.headers.host}`);
       const pathSegments = url.pathname.split("/").filter(Boolean);
       const roomInfo = pathSegments[pathSegments.length - 1];
       const token = url.searchParams.get("token");
-
-      console.log("Connection details:", {
-        url: url.toString(),
-        pathSegments,
-        roomInfo,
-        hasToken: !!token,
-      });
 
       if (!roomInfo?.startsWith("board:") || !token) {
         console.log("Invalid connection parameters - Missing room or token");
@@ -207,7 +197,6 @@ export function setupSocketServer(server: http.Server) {
       );
 
       if (!isMember) {
-        console.log("Not authorized");
         ws.close(1008, "Not authorized");
         return;
       }
@@ -375,11 +364,6 @@ export function setupSocketServer(server: http.Server) {
           clearInterval(pingInterval);
         }
       }, 15000);
-
-      // Add connected client logging
-      console.log(
-        `Total clients in room ${roomInfo}: ${rooms.get(roomInfo)!.size}`
-      );
 
       ws.send(
         JSON.stringify({
