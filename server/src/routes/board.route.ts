@@ -9,6 +9,7 @@ import {
   removeMemberFromBoard,
   updateBoardName,
   updateBoardContent,
+  inviteUser,
 } from "../controllers/board.controller";
 import { verifyToken } from "../middlewares/verifyToken";
 
@@ -28,5 +29,8 @@ router.delete("/:boardId", deleteBoard);
 // Board member management routes
 router.post("/:boardId/members", addMemberToBoard);
 router.delete("/:boardId/members/:memberId", removeMemberFromBoard);
+
+// Add invite route
+router.post("/:boardId/invite", inviteUser);
 
 export default router;

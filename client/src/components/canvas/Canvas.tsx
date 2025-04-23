@@ -11,6 +11,66 @@ interface Transform {
   scale: number;
 }
 
+interface RemoteUser {
+  userId: string;
+  username: string;
+  color: string;
+  cursor?: { x: number; y: number };
+}
+
+interface RemoteCursorProps {
+  user: RemoteUser;
+}
+
+const RemoteCursor = ({ user }: RemoteCursorProps) => {
+  if (!user.cursor) return null;
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: user.cursor.x,
+        top: user.cursor.y,
+        pointerEvents: "none",
+        zIndex: 1000,
+        transform: "translate(-50%, -50%)",
+      }}
+    >
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M5.65376 12.3673H5.46026L5.31717 12.4796L0.500002 16.0001L2.68571 17.3813L3.52414 18L3.68754 17.8882L7.85726 14.8319V14.6384L5.65376 12.3673Z"
+          fill={user.color}
+          stroke="white"
+          strokeWidth="1"
+        />
+      </svg>
+      <div
+        style={{
+          background: user.color,
+          color: "white",
+          padding: "2px 6px",
+          borderRadius: "4px",
+          fontSize: "12px",
+          marginTop: "4px",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {user.username}
+      </div>
+    </div>
+  );
+};
+
+const RemoteCursors = ({ users }: { users: RemoteUser[] }) => {
+  return (
+    <>
+      {users.map((user) => (
+        <RemoteCursor key={user.userId} user={user} />
+      ))}
+    </>
+  );
+};
+
 const Canvas: React.FC<CanvasProps> = ({ width = 800, height = 600 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -178,3 +238,4 @@ const Canvas: React.FC<CanvasProps> = ({ width = 800, height = 600 }) => {
 };
 
 export default Canvas;
+export { RemoteCursors };
