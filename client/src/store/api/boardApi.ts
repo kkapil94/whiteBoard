@@ -63,7 +63,6 @@ export const boardApi = createApi({
     }),
     getBoardById: builder.query<Board, string>({
       query: (id) => `/boards/${id}`,
-      providesTags: (result, error, id) => [{ type: "Board", id }],
     }),
     updateBoardContent: builder.mutation<
       Board,
@@ -74,9 +73,6 @@ export const boardApi = createApi({
         method: "PATCH",
         body: { content },
       }),
-      invalidatesTags: (result, error, arg) => [
-        { type: "Board", id: arg.boardId },
-      ],
     }),
     addBoardMember: builder.mutation<Board, { boardId: string; email: string }>(
       {
@@ -85,9 +81,6 @@ export const boardApi = createApi({
           method: "POST",
           body: { memberIdentifier: email },
         }),
-        invalidatesTags: (result, error, arg) => [
-          { type: "Board", id: arg.boardId },
-        ],
       }
     ),
   }),
