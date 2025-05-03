@@ -69,7 +69,7 @@ function Login() {
         setCredentials({ user: result.user, token: result.accessToken })
       );
 
-      toast("Account created successfully", {
+      toast("Logged In successfully", {
         description: "Welcome to Whiteboard!",
       });
 
@@ -79,7 +79,7 @@ function Login() {
       toast("Signin failed", {
         description:
           error.data?.message ||
-          "There was an error creating your account. Please try again.",
+          "There was an error logging in your account. Please try again.",
       });
     } finally {
       setIsLoading(false);
